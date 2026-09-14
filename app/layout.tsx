@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './timeline-v2.css';
 
 export const metadata: Metadata = {
   title: 'Darja Studio — Éditeur vidéo',

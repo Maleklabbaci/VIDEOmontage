@@ -40,6 +40,30 @@ export type MediaAsset = {
   duration?: number;
 };
 
+export type TimelineClipKind = 'video' | 'image' | 'audio' | 'caption' | 'text';
+
+export type TimelineClip = {
+  id: string;
+  trackId: string;
+  assetId?: string;
+  kind: TimelineClipKind;
+  name: string;
+  start: number;
+  duration: number;
+  sourceStart: number;
+  color: string;
+  text?: string;
+};
+
+export type TimelineTrack = {
+  id: string;
+  name: string;
+  kind: TimelineClipKind;
+  locked: boolean;
+  muted: boolean;
+  clips: TimelineClip[];
+};
+
 export const tabs: Array<{ id: TabId; label: string; icon: LucideIcon }> = [
   { id: 'media', label: 'Médias', icon: ImageIcon },
   { id: 'templates', label: 'Modèles', icon: Layers3 },
@@ -66,6 +90,59 @@ export const starterAssets: MediaAsset[] = [
   { id: 'm2', name: 'Plan lifestyle', kind: 'video', color: '#7567ff', duration: 12.4 },
   { id: 'm3', name: 'B-roll téléphone', kind: 'video', color: '#20c997', duration: 9.8 },
   { id: 'm4', name: 'Voix off — Darija', kind: 'audio', color: '#f5b841', duration: 32 },
+];
+
+export const initialTimelineTracks: TimelineTrack[] = [
+  {
+    id: 'video-main',
+    name: 'Vidéo 1',
+    kind: 'video',
+    locked: false,
+    muted: false,
+    clips: [
+      { id: 'clip-intro', trackId: 'video-main', assetId: 'm1', kind: 'video', name: 'Intro produit', start: 0, duration: 8.2, sourceStart: 0, color: '#d65b35' },
+      { id: 'clip-life', trackId: 'video-main', assetId: 'm2', kind: 'video', name: 'Plan lifestyle', start: 8.2, duration: 12.4, sourceStart: 0, color: '#6658d8' },
+      { id: 'clip-phone', trackId: 'video-main', assetId: 'm3', kind: 'video', name: 'B-roll téléphone', start: 20.6, duration: 9.8, sourceStart: 0, color: '#269c79' },
+    ],
+  },
+  {
+    id: 'video-overlay',
+    name: 'Vidéo 2',
+    kind: 'video',
+    locked: false,
+    muted: false,
+    clips: [
+      { id: 'clip-overlay', trackId: 'video-overlay', kind: 'video', name: 'Overlay produit', start: 4.6, duration: 5.4, sourceStart: 0, color: '#b94c83' },
+    ],
+  },
+  {
+    id: 'captions',
+    name: 'Captions',
+    kind: 'caption',
+    locked: false,
+    muted: false,
+    clips: demoCaptions.map((caption) => ({
+      id: `timeline-${caption.id}`,
+      trackId: 'captions',
+      kind: 'caption' as const,
+      name: caption.text,
+      text: caption.text,
+      start: caption.start,
+      duration: caption.end - caption.start,
+      sourceStart: 0,
+      color: '#6658b8',
+    })),
+  },
+  {
+    id: 'voice',
+    name: 'Voix off',
+    kind: 'audio',
+    locked: false,
+    muted: false,
+    clips: [
+      { id: 'clip-voice', trackId: 'voice', assetId: 'm4', kind: 'audio', name: 'Voix off — Darija.wav', start: 0, duration: 32, sourceStart: 0, color: '#23896d' },
+    ],
+  },
 ];
 
 export const templates = [

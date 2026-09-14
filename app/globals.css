@@ -70,6 +70,7 @@ button:disabled { opacity: .38; cursor: not-allowed; }
 .panel-tabs { display: flex; gap: 2px; margin: 11px 0 10px; border-bottom: 1px solid var(--line-soft); }
 .panel-tabs button { height: 27px; padding: 0 7px 8px; border: 0; border-bottom: 1px solid transparent; color: #777b86; background: transparent; font-size: 9px; cursor: pointer; }
 .panel-tabs button.active { color: white; border-color: var(--accent); }
+.media-helper { margin: -3px 0 9px; color: #5f646f; font-size: 7.5px; line-height: 1.35; }
 .media-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px 8px; }
 .media-add, .media-card { border: 0; background: transparent; text-align: left; cursor: pointer; min-width: 0; }
 .media-add { height: 77px; border: 1px dashed #383b44; border-radius: 7px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; color: #747985; background: #1a1b20; font-size: 9px; }

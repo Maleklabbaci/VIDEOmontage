@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     jobId,
     status: 'ready_for_worker',
-    message: 'Composition validée. Le worker Remotion/FFmpeg peut prendre ce job.',
+    message: 'Composition validée. Le worker open source FFmpeg/WebCodecs peut prendre ce job.',
     composition: {
       duration: payload.duration ?? 32,
       format: payload.format ?? '1080x1920',

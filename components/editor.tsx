@@ -6,6 +6,7 @@ import {
   ChevronDown,
   CircleHelp,
   Cloud,
+  Copy,
   Download,
   Eye,
   FolderUp,
@@ -13,6 +14,8 @@ import {
   ImagePlus,
   Languages,
   Lock,
+  LockOpen,
+  Magnet,
   Maximize2,
   Mic2,
   MoreHorizontal,
@@ -29,6 +32,7 @@ import {
   SkipForward,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   Type,
   Undo2,
   UploadCloud,
@@ -38,17 +42,20 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, CSSProperties, Dispatch, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Caption,
   CaptionStyle,
   demoCaptions,
   effects,
+  initialTimelineTracks,
   MediaAsset,
   starterAssets,
   tabs,
   TabId,
   templates,
+  TimelineClip,
+  TimelineTrack,
   transitions,
 } from '@/lib/editor-data';
 
@@ -109,10 +116,19 @@ function formatTime(value: number, frames = false) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+function cloneTracks(value: TimelineTrack[]) {
+  return value.map((track) => ({ ...track, clips: track.clips.map((clip) => ({ ...clip })) }));
+}
+
 export function Editor() {
   const [activeTab, setActiveTab] = useState<TabId>('media');
   const [assets, setAssets] = useState<MediaAsset[]>(starterAssets);
   const [captions, setCaptions] = useState<Caption[]>(demoCaptions);
+  const [tracks, setTracks] = useState<TimelineTrack[]>(initialTimelineTracks);
+  const [timelinePast, setTimelinePast] = useState<TimelineTrack[][]>([]);
+  const [timelineFuture, setTimelineFuture] = useState<TimelineTrack[][]>([]);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>('clip-life');
+  const [snapping, setSnapping] = useState(true);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(INITIAL_STYLE);
   const [pastStyles, setPastStyles] = useState<CaptionStyle[]>([]);
   const [futureStyles, setFutureStyles] = useState<CaptionStyle[]>([]);
@@ -135,10 +151,20 @@ export function Editor() {
     () => assets.find((asset) => asset.id === activeVideoId && asset.kind === 'video'),
     [assets, activeVideoId],
   );
-  const currentCaption = useMemo(
-    () => captions.find((caption) => currentTime >= caption.start && currentTime < caption.end) ?? captions[0],
-    [captions, currentTime],
-  );
+  const currentCaption = useMemo(() => {
+    const captionClips = tracks.find((track) => track.id === 'captions')?.clips ?? [];
+    const clip = captionClips.find((item) => currentTime >= item.start && currentTime < item.start + item.duration) ?? captionClips[0];
+    if (!clip) return captions[0];
+    const sourceId = clip.id.replace('timeline-', '');
+    const source = captions.find((caption) => caption.id === sourceId);
+    return {
+      id: sourceId,
+      start: clip.start,
+      end: clip.start + clip.duration,
+      text: clip.text ?? clip.name,
+      textAr: source?.textAr,
+    };
+  }, [captions, currentTime, tracks]);
 
   const notify = (message: string) => {
     setToast(message);
@@ -171,26 +197,155 @@ export function Editor() {
     if (videoRef.current) videoRef.current.volume = volume / 100;
   }, [volume]);
 
+  useEffect(() => {
+    const captionClips = tracks.find((track) => track.id === 'captions')?.clips ?? [];
+    setCaptions((items) => items.map((caption) => {
+      const clip = captionClips.find((item) => item.id === `timeline-${caption.id}`);
+      return clip ? { ...caption, start: clip.start, end: clip.start + clip.duration, text: clip.text ?? clip.name } : caption;
+    }));
+  }, [tracks]);
+
   const commitStyle = (patch: Partial<CaptionStyle>) => {
     setPastStyles((history) => [...history.slice(-29), captionStyle]);
     setFutureStyles([]);
     setCaptionStyle((style) => ({ ...style, ...patch }));
   };
 
+  const beginTimelineChange = () => {
+    setTimelinePast((history) => [...history.slice(-49), cloneTracks(tracks)]);
+    setTimelineFuture([]);
+  };
+
+  const commitTimeline = (updater: (current: TimelineTrack[]) => TimelineTrack[]) => {
+    beginTimelineChange();
+    setTracks((current) => updater(cloneTracks(current)));
+  };
+
   const undo = () => {
-    const previous = pastStyles.at(-1);
-    if (!previous) return;
+    const previousTimeline = timelinePast.at(-1);
+    if (previousTimeline) {
+      setTimelineFuture((future) => [cloneTracks(tracks), ...future]);
+      setTimelinePast((history) => history.slice(0, -1));
+      setTracks(cloneTracks(previousTimeline));
+      return;
+    }
+    const previousStyle = pastStyles.at(-1);
+    if (!previousStyle) return;
     setFutureStyles((future) => [captionStyle, ...future]);
     setPastStyles((history) => history.slice(0, -1));
-    setCaptionStyle(previous);
+    setCaptionStyle(previousStyle);
   };
 
   const redo = () => {
-    const next = futureStyles[0];
-    if (!next) return;
+    const nextTimeline = timelineFuture[0];
+    if (nextTimeline) {
+      setTimelinePast((history) => [...history, cloneTracks(tracks)]);
+      setTimelineFuture((future) => future.slice(1));
+      setTracks(cloneTracks(nextTimeline));
+      return;
+    }
+    const nextStyle = futureStyles[0];
+    if (!nextStyle) return;
     setPastStyles((history) => [...history, captionStyle]);
     setFutureStyles((future) => future.slice(1));
-    setCaptionStyle(next);
+    setCaptionStyle(nextStyle);
+  };
+
+  const removeSelectedClip = () => {
+    if (!selectedClipId) return;
+    commitTimeline((current) => current.map((track) => ({ ...track, clips: track.clips.filter((clip) => clip.id !== selectedClipId) })));
+    setSelectedClipId(null);
+    notify('Clip supprimé');
+  };
+
+  const duplicateSelectedClip = () => {
+    if (!selectedClipId) return;
+    commitTimeline((current) => current.map((track) => {
+      const source = track.clips.find((clip) => clip.id === selectedClipId);
+      if (!source) return track;
+      const duplicate: TimelineClip = {
+        ...source,
+        id: `${source.id}-copy-${Date.now().toString(36)}`,
+        start: Math.min(TOTAL_DURATION - source.duration, source.start + Math.min(.5, source.duration)),
+        name: `${source.name} copie`,
+      };
+      setSelectedClipId(duplicate.id);
+      return { ...track, clips: [...track.clips, duplicate] };
+    }));
+    notify('Clip dupliqué');
+  };
+
+  const splitSelectedClip = () => {
+    if (!selectedClipId) return;
+    const selected = tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId);
+    if (!selected || currentTime <= selected.start + .08 || currentTime >= selected.start + selected.duration - .08) {
+      notify('Place le curseur à l’intérieur du clip');
+      return;
+    }
+    const rightId = `${selected.id}-split-${Date.now().toString(36)}`;
+    commitTimeline((current) => current.map((track) => ({
+      ...track,
+      clips: track.clips.flatMap((clip) => {
+        if (clip.id !== selectedClipId) return [clip];
+        const leftDuration = currentTime - clip.start;
+        const right: TimelineClip = {
+          ...clip,
+          id: rightId,
+          name: `${clip.name} B`,
+          start: currentTime,
+          duration: clip.duration - leftDuration,
+          sourceStart: clip.sourceStart + leftDuration,
+        };
+        return [{ ...clip, duration: leftDuration, name: `${clip.name} A` }, right];
+      }),
+    })));
+    setSelectedClipId(rightId);
+    notify('Clip découpé au curseur');
+  };
+
+  const addVideoTrack = () => {
+    commitTimeline((current) => {
+      const videoCount = current.filter((track) => track.kind === 'video').length + 1;
+      const insertAt = current.findIndex((track) => track.kind !== 'video');
+      const nextTrack: TimelineTrack = { id: `video-${Date.now().toString(36)}`, name: `Vidéo ${videoCount}`, kind: 'video', locked: false, muted: false, clips: [] };
+      const copy = [...current];
+      copy.splice(insertAt < 0 ? current.length : insertAt, 0, nextTrack);
+      return copy;
+    });
+    notify('Nouvelle piste vidéo ajoutée');
+  };
+
+  const toggleTrackLock = (trackId: string) => {
+    commitTimeline((current) => current.map((track) => track.id === trackId ? { ...track, locked: !track.locked } : track));
+  };
+
+  const addAssetToTimeline = (asset: MediaAsset) => {
+    const defaultDuration = asset.kind === 'image' ? 4 : 6;
+    const duration = Math.min(TOTAL_DURATION, Math.max(.5, asset.duration ?? defaultDuration));
+    const start = Math.min(Math.max(0, currentTime), TOTAL_DURATION - duration);
+    const clipId = `clip-${Date.now().toString(36)}`;
+    const audioTrackId = `audio-${Date.now().toString(36)}`;
+    commitTimeline((current) => {
+      if (asset.kind === 'audio') {
+        const audioNumber = current.filter((track) => track.kind === 'audio').length + 1;
+        return [...current, {
+          id: audioTrackId,
+          name: `Audio ${audioNumber}`,
+          kind: 'audio',
+          locked: false,
+          muted: false,
+          clips: [{ id: clipId, trackId: audioTrackId, assetId: asset.id, kind: 'audio', name: asset.name, start, duration, sourceStart: 0, color: asset.color }],
+        }];
+      }
+      const destination = current.find((track) => track.kind === 'video' && !track.locked);
+      if (!destination) return current;
+      return current.map((track) => track.id === destination.id ? {
+        ...track,
+        clips: [...track.clips, { id: clipId, trackId: track.id, assetId: asset.id, kind: asset.kind, name: asset.name, start, duration, sourceStart: 0, color: asset.color }],
+      } : track);
+    });
+    setSelectedClipId(clipId);
+    notify(`${asset.name} ajouté à ${formatTime(start)}`);
   };
 
   const togglePlayback = async () => {
@@ -216,6 +371,31 @@ export function Editor() {
       videoRef.current.currentTime = Math.min(next, videoDuration);
     }
   };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches('input, textarea, [contenteditable="true"]')) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        void togglePlayback();
+      } else if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        removeSelectedClip();
+      } else if (event.key.toLowerCase() === 's' && !event.ctrlKey && !event.metaKey) {
+        event.preventDefault();
+        splitSelectedClip();
+      } else if (event.key.toLowerCase() === 'd' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        duplicateSelectedClip();
+      } else if (event.key.toLowerCase() === 'z' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        event.shiftKey ? redo() : undo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   const onUpload = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -243,6 +423,10 @@ export function Editor() {
 
   const updateCurrentCaption = (text: string) => {
     setCaptions((items) => items.map((item) => (item.id === currentCaption.id ? { ...item, text } : item)));
+    setTracks((items) => items.map((track) => track.id === 'captions' ? {
+      ...track,
+      clips: track.clips.map((clip) => clip.id === `timeline-${currentCaption.id}` ? { ...clip, name: text, text } : clip),
+    } : track));
   };
 
   const createRenderJob = async () => {
@@ -259,6 +443,7 @@ export function Editor() {
           codec: 'h264',
           captions,
           captionStyle,
+          tracks,
           assets: assets.map(({ id, name, kind, duration }) => ({ id, name, kind, duration })),
         }),
       });
@@ -280,6 +465,7 @@ export function Editor() {
       format: '1080x1920',
       captions,
       captionStyle,
+      tracks,
       assets: assets.map(({ id, name, kind, duration }) => ({ id, name, kind, duration })),
     };
     const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
@@ -326,10 +512,10 @@ export function Editor() {
         </div>
 
         <div className="top-actions">
-          <button className="icon-button" onClick={undo} disabled={!pastStyles.length} title="Annuler">
+          <button className="icon-button" onClick={undo} disabled={!timelinePast.length && !pastStyles.length} title="Annuler">
             <Undo2 size={18} />
           </button>
-          <button className="icon-button" onClick={redo} disabled={!futureStyles.length} title="Rétablir">
+          <button className="icon-button" onClick={redo} disabled={!timelineFuture.length && !futureStyles.length} title="Rétablir">
             <Redo2 size={18} />
           </button>
           <span className="top-divider" />
@@ -373,6 +559,7 @@ export function Editor() {
             setScriptMode={setScriptMode}
             setCurrentTime={seek}
             updateCurrentCaption={updateCurrentCaption}
+            addAssetToTimeline={addAssetToTimeline}
             notify={notify}
           />
           <input ref={fileInputRef} className="hidden-input" type="file" multiple accept="video/*,image/*,audio/*" onChange={onUpload} />
@@ -491,12 +678,27 @@ export function Editor() {
 
         <Timeline
           currentTime={currentTime}
-          captions={captions}
+          tracks={tracks}
+          setTracks={setTracks}
+          beginTimelineChange={beginTimelineChange}
+          selectedClipId={selectedClipId}
+          setSelectedClipId={setSelectedClipId}
+          snapping={snapping}
+          setSnapping={setSnapping}
           zoom={zoom}
           setZoom={setZoom}
           seek={seek}
           playing={playing}
           togglePlayback={togglePlayback}
+          splitSelectedClip={splitSelectedClip}
+          duplicateSelectedClip={duplicateSelectedClip}
+          removeSelectedClip={removeSelectedClip}
+          addVideoTrack={addVideoTrack}
+          toggleTrackLock={toggleTrackLock}
+          undo={undo}
+          redo={redo}
+          canUndo={Boolean(timelinePast.length || pastStyles.length)}
+          canRedo={Boolean(timelineFuture.length || futureStyles.length)}
         />
       </div>
 
@@ -528,6 +730,7 @@ function PanelContent({
   setScriptMode,
   setCurrentTime,
   updateCurrentCaption,
+  addAssetToTimeline,
   notify,
 }: {
   activeTab: TabId;
@@ -541,6 +744,7 @@ function PanelContent({
   setScriptMode: (value: 'latin' | 'arabic') => void;
   setCurrentTime: (time: number) => void;
   updateCurrentCaption: (text: string) => void;
+  addAssetToTimeline: (asset: MediaAsset) => void;
   notify: (message: string) => void;
 }) {
   if (activeTab === 'media') {
@@ -551,6 +755,7 @@ function PanelContent({
           <button className="upload-button" onClick={() => fileInputRef.current?.click()}><UploadCloud size={17} /> Importer des médias</button>
           <div className="search-box"><Search size={15} /><input placeholder="Rechercher vos médias" /></div>
           <div className="panel-tabs"><button className="active">Tout</button><button>Vidéos</button><button>Images</button><button>Audio</button></div>
+          <p className="media-helper">Double-clique un média pour l’ajouter au curseur.</p>
           <div className="media-grid">
             <button className="media-add" onClick={() => fileInputRef.current?.click()}><ImagePlus size={23} /><span>Ajouter</span></button>
             {assets.map((asset) => (
@@ -559,8 +764,9 @@ function PanelContent({
                 className={`media-card ${activeVideoId === asset.id ? 'selected' : ''}`}
                 onClick={() => {
                   if (asset.kind === 'video' && asset.url) setActiveVideoId(asset.id);
-                  else notify(asset.url ? `${asset.name} ajouté à la sélection` : 'Média de démonstration');
+                  else notify('Double-clique pour ajouter ce média à la timeline');
                 }}
+                onDoubleClick={() => addAssetToTimeline(asset)}
               >
                 <div className="media-thumb" style={{ '--media-color': asset.color } as CSSProperties}>
                   {asset.url && asset.kind === 'image' ? <img src={asset.url} alt="" /> : asset.url && asset.kind === 'video' ? <video src={asset.url} muted /> : <Grid2X2 size={17} />}
@@ -730,40 +936,178 @@ function DemoVisual() {
 
 function Timeline({
   currentTime,
-  captions,
+  tracks,
+  setTracks,
+  beginTimelineChange,
+  selectedClipId,
+  setSelectedClipId,
+  snapping,
+  setSnapping,
   zoom,
   setZoom,
   seek,
   playing,
   togglePlayback,
+  splitSelectedClip,
+  duplicateSelectedClip,
+  removeSelectedClip,
+  addVideoTrack,
+  toggleTrackLock,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
 }: {
   currentTime: number;
-  captions: Caption[];
+  tracks: TimelineTrack[];
+  setTracks: Dispatch<SetStateAction<TimelineTrack[]>>;
+  beginTimelineChange: () => void;
+  selectedClipId: string | null;
+  setSelectedClipId: (id: string | null) => void;
+  snapping: boolean;
+  setSnapping: (value: boolean) => void;
   zoom: number;
   setZoom: (value: number) => void;
   seek: (time: number) => void;
   playing: boolean;
   togglePlayback: () => void;
+  splitSelectedClip: () => void;
+  duplicateSelectedClip: () => void;
+  removeSelectedClip: () => void;
+  addVideoTrack: () => void;
+  toggleTrackLock: (trackId: string) => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }) {
-  const timelineRef = useRef<HTMLDivElement>(null);
-  const setFromPointer = (clientX: number) => {
-    if (!timelineRef.current) return;
-    const rect = timelineRef.current.getBoundingClientRect();
-    const labelWidth = 112;
-    const x = Math.min(rect.width - labelWidth, Math.max(0, clientX - rect.left - labelWidth));
-    seek((x / (rect.width - labelWidth)) * TOTAL_DURATION);
+  type DragMode = 'move' | 'trim-left' | 'trim-right';
+  type DragState = {
+    mode: DragMode;
+    clip: TimelineClip;
+    pointerX: number;
+    laneWidth: number;
+    trackId: string;
   };
-  const rulerMarks = Array.from({ length: 9 }, (_, index) => index * 4);
+
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
+  const selectedClip = useMemo(
+    () => tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId) ?? null,
+    [tracks, selectedClipId],
+  );
+  const rulerMarks = Array.from({ length: 17 }, (_, index) => index * 2);
+
+  const compatibleTrack = (clip: TimelineClip, track: TimelineTrack) => {
+    if (clip.kind === 'video' || clip.kind === 'image') return track.kind === 'video';
+    return clip.kind === track.kind;
+  };
+
+  const snapValue = (value: number, targets: number[]) => {
+    if (!snapping) return value;
+    const threshold = Math.max(.06, .22 * (78 / zoom));
+    const nearest = targets.reduce<{ value: number; distance: number } | null>((best, target) => {
+      const distance = Math.abs(target - value);
+      return !best || distance < best.distance ? { value: target, distance } : best;
+    }, null);
+    return nearest && nearest.distance <= threshold ? nearest.value : value;
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    document.body.classList.add('timeline-dragging');
+
+    const onPointerMove = (event: PointerEvent) => {
+      const delta = ((event.clientX - drag.pointerX) / drag.laneWidth) * TOTAL_DURATION;
+      const element = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+      const hoveredLane = element?.closest<HTMLElement>('[data-track-id]');
+
+      setTracks((current) => {
+        const allClips = current.flatMap((track) => track.clips).filter((clip) => clip.id !== drag.clip.id);
+        const targets = [0, currentTime, TOTAL_DURATION, ...allClips.flatMap((clip) => [clip.start, clip.start + clip.duration])];
+
+        if (drag.mode === 'move') {
+          const maxStart = Math.max(0, TOTAL_DURATION - drag.clip.duration);
+          const rawStart = Math.min(maxStart, Math.max(0, drag.clip.start + delta));
+          const nextStart = Math.min(maxStart, Math.max(0, snapValue(rawStart, targets)));
+          let targetTrackId = drag.trackId;
+          if (hoveredLane?.dataset.trackId) {
+            const candidateTrack = current.find((track) => track.id === hoveredLane.dataset.trackId);
+            if (candidateTrack && !candidateTrack.locked && compatibleTrack(drag.clip, candidateTrack)) targetTrackId = candidateTrack.id;
+          }
+          return current.map((track) => {
+            const withoutDragged = track.clips.filter((clip) => clip.id !== drag.clip.id);
+            if (track.id !== targetTrackId) return withoutDragged.length === track.clips.length ? track : { ...track, clips: withoutDragged };
+            const moved = { ...drag.clip, trackId: targetTrackId, start: nextStart };
+            return { ...track, clips: [...withoutDragged, moved].sort((a, b) => a.start - b.start) };
+          });
+        }
+
+        return current.map((track) => {
+          if (track.id !== drag.trackId) return track;
+          return {
+            ...track,
+            clips: track.clips.map((clip) => {
+              if (clip.id !== drag.clip.id) return clip;
+              if (drag.mode === 'trim-left') {
+                const fixedEnd = drag.clip.start + drag.clip.duration;
+                const rawStart = Math.min(fixedEnd - .2, Math.max(0, drag.clip.start + delta));
+                const nextStart = Math.min(fixedEnd - .2, Math.max(0, snapValue(rawStart, targets)));
+                return {
+                  ...clip,
+                  start: nextStart,
+                  duration: fixedEnd - nextStart,
+                  sourceStart: Math.max(0, drag.clip.sourceStart + (nextStart - drag.clip.start)),
+                };
+              }
+              const rawEnd = Math.min(TOTAL_DURATION, Math.max(drag.clip.start + .2, drag.clip.start + drag.clip.duration + delta));
+              const nextEnd = Math.min(TOTAL_DURATION, Math.max(drag.clip.start + .2, snapValue(rawEnd, targets)));
+              return { ...clip, duration: nextEnd - drag.clip.start };
+            }),
+          };
+        });
+      });
+    };
+
+    const onPointerUp = () => setDrag(null);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp, { once: true });
+    return () => {
+      document.body.classList.remove('timeline-dragging');
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+  }, [drag, currentTime, setTracks, snapping, zoom]);
+
+  const startDrag = (event: React.PointerEvent, clip: TimelineClip, track: TimelineTrack, mode: DragMode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (track.locked) return;
+    const lane = (event.currentTarget as HTMLElement).closest<HTMLElement>('.track-content-v2');
+    if (!lane) return;
+    setSelectedClipId(clip.id);
+    beginTimelineChange();
+    setDrag({ mode, clip: { ...clip }, pointerX: event.clientX, laneWidth: lane.getBoundingClientRect().width, trackId: track.id });
+  };
+
+  const seekFromEvent = (event: React.PointerEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    seek(((event.clientX - rect.left) / rect.width) * TOTAL_DURATION);
+  };
 
   return (
-    <section className="timeline-panel">
+    <section className="timeline-panel timeline-v2">
       <div className="timeline-toolbar">
         <div className="timeline-tools-left">
-          <button className="icon-button small"><MousePointer2 size={16} /></button>
-          <button className="icon-button small"><Scissors size={16} /></button>
+          <button className="icon-button small active-tool" title="Outil de sélection"><MousePointer2 size={16} /></button>
+          <button className="icon-button small" onClick={splitSelectedClip} disabled={!selectedClip} title="Découper au curseur (S)"><Scissors size={16} /></button>
+          <button className="icon-button small" onClick={duplicateSelectedClip} disabled={!selectedClip} title="Dupliquer (Ctrl+D)"><Copy size={15} /></button>
+          <button className="icon-button small danger-tool" onClick={removeSelectedClip} disabled={!selectedClip} title="Supprimer"><Trash2 size={15} /></button>
           <span />
-          <button className="icon-button small"><Undo2 size={16} /></button>
-          <button className="icon-button small"><Redo2 size={16} /></button>
+          <button className="icon-button small" onClick={undo} disabled={!canUndo} title="Annuler"><Undo2 size={16} /></button>
+          <button className="icon-button small" onClick={redo} disabled={!canRedo} title="Rétablir"><Redo2 size={16} /></button>
+          <button className={`icon-button small ${snapping ? 'magnet-on' : ''}`} onClick={() => setSnapping(!snapping)} title="Snapping magnétique"><Magnet size={15} /></button>
+          <button className="add-track-button" onClick={addVideoTrack}><Plus size={14} /> Piste</button>
         </div>
         <div className="timeline-transport">
           <button onClick={() => seek(0)}><SkipBack size={15} /></button>
@@ -771,63 +1115,126 @@ function Timeline({
           <strong>{formatTime(currentTime, true)}</strong>
         </div>
         <div className="timeline-zoom">
-          <button onClick={() => setZoom(Math.max(20, zoom - 10))}><ZoomOut size={15} /></button>
-          <input aria-label="Zoom timeline" type="range" min="20" max="140" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} />
-          <button onClick={() => setZoom(Math.min(140, zoom + 10))}><ZoomIn size={15} /></button>
-          <button className="fit-button">Ajuster</button>
+          {selectedClip && <span className="selection-readout">{selectedClip.name} · {selectedClip.duration.toFixed(1)}s</span>}
+          <button onClick={() => setZoom(Math.max(40, zoom - 10))}><ZoomOut size={15} /></button>
+          <input aria-label="Zoom timeline" type="range" min="40" max="180" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} />
+          <button onClick={() => setZoom(Math.min(180, zoom + 10))}><ZoomIn size={15} /></button>
+          <button className="fit-button" onClick={() => setZoom(78)}>Ajuster</button>
         </div>
       </div>
 
-      <div
-        className="timeline-body"
-        ref={timelineRef}
-        onMouseDown={(event) => setFromPointer(event.clientX)}
-        style={{ '--timeline-scale': zoom / 78 } as CSSProperties}
-      >
-        <div className="track-label ruler-label"><span>PISTES</span></div>
-        <div className="timeline-ruler">
-          {rulerMarks.map((mark) => <span key={mark} style={{ left: `${(mark / TOTAL_DURATION) * 100}%` }}><i />{formatTime(mark)}</span>)}
-        </div>
+      <div className="timeline-body-v2" ref={timelineScrollRef} onPointerDown={(event) => {
+        if (event.target === event.currentTarget) setSelectedClipId(null);
+      }}>
+        <div className="timeline-content-v2" style={{ width: `${Math.max(100, (zoom / 78) * 100)}%` }}>
+          <div className="timeline-row-v2 ruler-row-v2">
+            <div className="track-label-v2 ruler-label-v2"><span>PISTES</span></div>
+            <div
+              className="ruler-content-v2"
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                seekFromEvent(event);
+              }}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) seekFromEvent(event);
+              }}
+            >
+              {rulerMarks.map((mark) => (
+                <span key={mark} className={mark % 4 === 0 ? 'major' : ''} style={{ left: `${(mark / TOTAL_DURATION) * 100}%` }}>
+                  <i />{mark % 4 === 0 ? formatTime(mark) : ''}
+                </span>
+              ))}
+            </div>
+          </div>
 
-        <div className="track-label"><div className="track-icon video"><Grid2X2 size={14} /></div><span>Vidéo</span><Lock size={12} /></div>
-        <div className="track-lane video-lane">
-          <Clip className="clip-orange" start={0} end={8.2} name="Intro produit" />
-          <Clip className="clip-violet" start={8.2} end={20.6} name="Plan lifestyle" />
-          <Clip className="clip-green" start={20.6} end={30.4} name="B-roll téléphone" />
-          <button className="clip-add" style={{ left: '95%' }}><Plus size={13} /></button>
-          <span className="transition-dot" style={{ left: '25.6%' }}>×</span>
-          <span className="transition-dot" style={{ left: '64.2%' }}>×</span>
-        </div>
-
-        <div className="track-label"><div className="track-icon caption"><Type size={14} /></div><span>Captions</span><Lock size={12} /></div>
-        <div className="track-lane captions-lane">
-          {captions.map((caption, index) => (
-            <div key={caption.id} className={`caption-clip shade-${index % 3}`} style={{ left: `${(caption.start / TOTAL_DURATION) * 100}%`, width: `${((caption.end - caption.start) / TOTAL_DURATION) * 100}%` }}>
-              <span>{caption.text}</span>
+          {tracks.map((track) => (
+            <div key={track.id} className={`timeline-row-v2 kind-${track.kind}`}>
+              <div className="track-label-v2">
+                <div className={`track-icon ${track.kind}`}>
+                  {track.kind === 'video' ? <Grid2X2 size={13} /> : track.kind === 'audio' ? <Volume2 size={13} /> : <Type size={13} />}
+                </div>
+                <span>{track.name}</span>
+                <button
+                  title={track.locked ? 'Déverrouiller' : 'Verrouiller'}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => toggleTrackLock(track.id)}
+                >
+                  {track.locked ? <Lock size={12} /> : <LockOpen size={12} />}
+                </button>
+              </div>
+              <div
+                className={`track-content-v2 ${track.locked ? 'locked' : ''}`}
+                data-track-id={track.id}
+                onPointerDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  setSelectedClipId(null);
+                  seekFromEvent(event);
+                }}
+              >
+                {track.clips.map((clip) => (
+                  <TimelineClipView
+                    key={clip.id}
+                    clip={clip}
+                    track={track}
+                    selected={clip.id === selectedClipId}
+                    dragging={clip.id === drag?.clip.id}
+                    onSelect={() => setSelectedClipId(clip.id)}
+                    onStartDrag={startDrag}
+                  />
+                ))}
+                {!track.clips.length && <span className="empty-track-hint">Dépose un média ici</span>}
+              </div>
             </div>
           ))}
-        </div>
 
-        <div className="track-label"><div className="track-icon audio"><Volume2 size={14} /></div><span>Voix off</span><Lock size={12} /></div>
-        <div className="track-lane audio-lane">
-          <div className="audio-clip">
-            <span className="waveform">{Array.from({ length: 58 }, (_, i) => <i key={i} style={{ height: `${18 + ((i * 17) % 68)}%` }} />)}</span>
-            <strong>Voix off — Darija.wav</strong>
+          <div className="playhead-v2" style={{ left: `calc(112px + (100% - 112px) * ${currentTime / TOTAL_DURATION})` }}>
+            <i /><span />
           </div>
-        </div>
-
-        <div className="playhead" style={{ left: `calc(112px + (100% - 112px) * ${currentTime / TOTAL_DURATION})` }}>
-          <i /><span />
         </div>
       </div>
     </section>
   );
 }
 
-function Clip({ className, start, end, name }: { className: string; start: number; end: number; name: string }) {
+function TimelineClipView({
+  clip,
+  track,
+  selected,
+  dragging,
+  onSelect,
+  onStartDrag,
+}: {
+  clip: TimelineClip;
+  track: TimelineTrack;
+  selected: boolean;
+  dragging: boolean;
+  onSelect: () => void;
+  onStartDrag: (event: React.PointerEvent, clip: TimelineClip, track: TimelineTrack, mode: 'move' | 'trim-left' | 'trim-right') => void;
+}) {
+  const clipStyle = {
+    left: `${(clip.start / TOTAL_DURATION) * 100}%`,
+    width: `${(clip.duration / TOTAL_DURATION) * 100}%`,
+    '--clip-color': clip.color,
+  } as CSSProperties;
+
   return (
-    <div className={`video-clip ${className}`} style={{ left: `${(start / TOTAL_DURATION) * 100}%`, width: `${((end - start) / TOTAL_DURATION) * 100}%` }}>
-      <i /><span>{name}</span><small>{formatTime(end - start)}</small>
+    <div
+      className={`timeline-clip-v2 ${clip.kind} ${selected ? 'selected' : ''} ${dragging ? 'dragging' : ''}`}
+      style={clipStyle}
+      title={`${clip.name} — ${clip.duration.toFixed(2)}s`}
+      onClick={(event) => { event.stopPropagation(); onSelect(); }}
+      onPointerDown={(event) => onStartDrag(event, clip, track, 'move')}
+    >
+      <button className="trim-handle left" aria-label="Raccourcir le début" onPointerDown={(event) => onStartDrag(event, clip, track, 'trim-left')}><i /></button>
+      {clip.kind === 'audio' && (
+        <span className="waveform-v2">{Array.from({ length: 64 }, (_, i) => <i key={i} style={{ height: `${18 + ((i * 17) % 70)}%` }} />)}</span>
+      )}
+      {clip.kind === 'video' && <span className="clip-film-pattern" />}
+      <span className="clip-copy">
+        <strong>{clip.name}</strong>
+        {clip.kind !== 'caption' && <small>{clip.duration.toFixed(1)}s</small>}
+      </span>
+      <button className="trim-handle right" aria-label="Raccourcir la fin" onPointerDown={(event) => onStartDrag(event, clip, track, 'trim-right')}><i /></button>
     </div>
   );
 }
@@ -868,7 +1275,7 @@ function ExportDialog({
             </div>
             <div className="export-summary"><div><Sparkles size={17} /><span><strong>Prêt pour le moteur de rendu</strong><small>32 s · environ 18 Mo · captions intégrées</small></span></div><Check size={17} /></div>
             {renderStatus === 'ready' && (
-              <div className="render-message success"><Check size={16} /><span><strong>Job {renderJob} créé</strong>Le contrat front/API est validé. Le worker Remotion + FFmpeg sera connecté à la prochaine phase pour produire le MP4.</span></div>
+              <div className="render-message success"><Check size={16} /><span><strong>Job {renderJob} créé</strong>Le contrat front/API est validé. Le worker open source FFmpeg + WebCodecs sera connecté à la prochaine phase pour produire le MP4.</span></div>
             )}
             {renderStatus === 'error' && <div className="render-message error">Impossible de préparer le job de rendu.</div>}
           </div>

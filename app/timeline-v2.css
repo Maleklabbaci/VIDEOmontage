@@ -1,0 +1,57 @@
+/* Interactive timeline engine */
+.timeline-v2 .timeline-toolbar { grid-template-columns: minmax(360px, 1fr) auto minmax(300px, 1fr); }
+.timeline-v2 .timeline-tools-left { min-width: 0; }
+.active-tool { color: #ff8054 !important; background: rgba(255, 107, 53, .1) !important; }
+.danger-tool:hover:not(:disabled) { color: #ff786d !important; background: rgba(255, 82, 70, .1) !important; }
+.magnet-on { color: #8f82ff !important; background: rgba(117, 103, 255, .12) !important; }
+.add-track-button { height: 25px; margin-left: 4px; padding: 0 8px; border: 1px solid #32343d; border-radius: 5px; display: inline-flex; align-items: center; gap: 4px; color: #9b9fa9; background: #202127; font-size: 7.5px; cursor: pointer; }
+.add-track-button:hover { color: white; border-color: #484b56; }
+.selection-readout { max-width: 150px; margin-right: 5px; overflow: hidden; color: #706f7c; font-size: 6.8px; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-body-v2 { height: calc(100% - 38px); position: relative; overflow: auto; scrollbar-width: thin; scrollbar-color: #383a43 #15161a; background: #131419; }
+.timeline-content-v2 { min-width: 760px; min-height: 100%; position: relative; }
+.timeline-row-v2 { min-width: 100%; height: 46px; display: grid; grid-template-columns: 112px minmax(648px, 1fr); }
+.timeline-row-v2.ruler-row-v2 { height: 24px; position: sticky; top: 0; z-index: 14; }
+.timeline-row-v2.kind-caption { height: 40px; }
+.timeline-row-v2.kind-audio { height: 46px; }
+.track-label-v2 { width: 112px; height: 100%; padding: 0 8px; border-right: 1px solid #292b32; border-bottom: 1px solid #24262d; position: sticky; left: 0; z-index: 9; display: grid; grid-template-columns: 19px minmax(0, 1fr) 18px; align-items: center; gap: 5px; color: #858994; background: #17181d; font-size: 7.5px; }
+.track-label-v2 > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-label-v2 > button { width: 18px; height: 20px; padding: 0; border: 0; display: grid; place-items: center; color: #595e68; background: transparent; cursor: pointer; }
+.track-label-v2 > button:hover { color: #c8cad0; }
+.ruler-label-v2 { z-index: 16; display: flex; color: #50545f; font-size: 6px; font-weight: 800; letter-spacing: .08em; }
+.track-icon.video { color: #ff8d65; background: rgba(255,107,53,.12); }
+.track-icon.caption { color: #ae9fff; background: rgba(117,103,255,.14); }
+.track-icon.audio { color: #4fdab1; background: rgba(36,201,151,.13); }
+.ruler-content-v2 { height: 24px; border-bottom: 1px solid #292b32; position: relative; cursor: ew-resize; background: #15161b; }
+.ruler-content-v2 > span { height: 100%; position: absolute; top: 0; color: #555a64; font-size: 6px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.ruler-content-v2 > span i { width: 1px; height: 5px; position: absolute; top: 0; background: #3e414a; }
+.ruler-content-v2 > span.major i { height: 8px; background: #565a64; }
+.ruler-content-v2 > span.major { padding-top: 8px; }
+.track-content-v2 { height: 100%; border-bottom: 1px solid #25272e; position: relative; overflow: hidden; background-color: #131419; background-image: linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px); background-size: 6.25% 100%; cursor: crosshair; }
+.track-content-v2.locked { opacity: .56; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.015) 0 4px, transparent 4px 8px); }
+.empty-track-hint { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #3e424b; font-size: 7px; pointer-events: none; }
+.timeline-clip-v2 { height: calc(100% - 8px); min-width: 6px; top: 4px; border: 1px solid color-mix(in srgb, var(--clip-color), white 11%); border-radius: 4px; position: absolute; z-index: 2; overflow: hidden; color: white; background: linear-gradient(145deg, color-mix(in srgb, var(--clip-color), white 5%), color-mix(in srgb, var(--clip-color), #0b0c0f 17%)); box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); cursor: grab; touch-action: none; }
+.timeline-clip-v2:hover { filter: brightness(1.08); }
+.timeline-clip-v2.selected { z-index: 4; border-color: #fff; box-shadow: 0 0 0 2px #ff7042, inset 0 0 0 1px rgba(0,0,0,.15); }
+.timeline-clip-v2.dragging { z-index: 8; opacity: .9; cursor: grabbing; box-shadow: 0 6px 18px rgba(0,0,0,.42), 0 0 0 2px #ff7042; }
+.clip-copy { position: absolute; z-index: 2; inset: 0 8px; display: flex; align-items: flex-end; gap: 6px; padding-bottom: 4px; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,.35); }
+.clip-copy strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 6.8px; }
+.clip-copy small { margin-left: auto; font-size: 6px; opacity: .72; }
+.timeline-clip-v2.caption { border-color: #5e55ab; color: #d3ceff; background: linear-gradient(145deg, #373163, #29264b); }
+.timeline-clip-v2.caption .clip-copy { inset: 0 5px; align-items: center; padding: 0; }
+.timeline-clip-v2.caption .clip-copy strong { font-weight: 600; }
+.timeline-clip-v2.audio { border-color: #2d8d73; color: #a0efd7; background: rgba(29, 113, 91, .54); }
+.clip-film-pattern { position: absolute; inset: 0; opacity: .58; background-image: repeating-linear-gradient(90deg, transparent 0 24px, rgba(0,0,0,.18) 25px 27px), radial-gradient(circle at 22px 12px, rgba(255,255,255,.12), transparent 10px); pointer-events: none; }
+.waveform-v2 { position: absolute; inset: 4px 7px 5px; display: flex; align-items: center; gap: 2px; opacity: .6; pointer-events: none; }
+.waveform-v2 i { min-width: 1px; flex: 1; border-radius: 1px; background: #69dbbb; }
+.trim-handle { width: 7px; height: 100%; padding: 0; border: 0; position: absolute; top: 0; z-index: 6; display: none; align-items: center; justify-content: center; background: #ff7042; cursor: ew-resize; touch-action: none; }
+.trim-handle.left { left: 0; }
+.trim-handle.right { right: 0; }
+.trim-handle i { width: 1px; height: 13px; border-radius: 1px; background: rgba(255,255,255,.85); }
+.timeline-clip-v2.selected .trim-handle { display: flex; }
+.playhead-v2 { width: 1px; top: 0; bottom: 0; z-index: 12; position: absolute; pointer-events: none; background: #ff6046; box-shadow: 0 0 5px rgba(255,67,45,.42); }
+.playhead-v2 i { width: 9px; height: 8px; position: absolute; top: 0; left: -4px; border-radius: 2px 2px 5px 5px; background: #ff6046; }
+.timeline-dragging, .timeline-dragging * { cursor: grabbing !important; user-select: none !important; }
+@media (max-width: 1250px) {
+  .selection-readout { display: none; }
+  .timeline-v2 .timeline-toolbar { grid-template-columns: minmax(330px, 1fr) auto minmax(220px, 1fr); }
+}
