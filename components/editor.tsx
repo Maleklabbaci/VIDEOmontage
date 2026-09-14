@@ -2,14 +2,19 @@
 
 import {
   ArrowLeft,
+  ArrowRight,
   Check,
+  CheckCircle2,
   CircleHelp,
+  Clapperboard,
   Cloud,
   Copy,
   Crop,
   Diamond,
   Download,
   Eye,
+  EyeOff,
+  FileText,
   FolderUp,
   Grid2X2,
   ImagePlus,
@@ -18,12 +23,15 @@ import {
   Magnet,
   Maximize2,
   Mic2,
+  MonitorPlay,
   MousePointer2,
   Move,
+  Palette,
   Pause,
   Play,
   Plus,
   Redo2,
+  Rocket,
   RotateCcw,
   Scissors,
   Search,
@@ -31,12 +39,14 @@ import {
   SkipBack,
   SkipForward,
   SlidersHorizontal,
+  Smartphone,
   Sparkles,
   Trash2,
   Type,
   Undo2,
   UploadCloud,
   Volume2,
+  VolumeX,
   X,
   ZoomIn,
   ZoomOut,
@@ -143,6 +153,11 @@ function probeMediaDuration(file: File, url: string) {
 }
 
 export function Editor() {
+  const [mode, setMode] = useState<'auto' | 'advanced'>('auto');
+  return mode === 'auto' ? <AutoStudio onOpenAdvanced={() => setMode('advanced')} /> : <AdvancedEditor onBackToEasy={() => setMode('auto')} />;
+}
+
+function AdvancedEditor({ onBackToEasy }: { onBackToEasy: () => void }) {
   const [activeTab, setActiveTab] = useState<TabId>('media');
   const [assets, setAssets] = useState<MediaAsset[]>(starterAssets);
   const [captions, setCaptions] = useState<Caption[]>(demoCaptions);
@@ -161,6 +176,8 @@ export function Editor() {
   const [scriptMode, setScriptMode] = useState<'latin' | 'arabic'>('latin');
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('Démo produit — Darija');
+  const [saveState, setSaveState] = useState<'saving' | 'saved'>('saved');
+  const [assetDragActive, setAssetDragActive] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [scriptOpen, setScriptOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -170,6 +187,7 @@ export function Editor() {
   const [toast, setToast] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const autosaveReady = useRef(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedTimelineClip = useMemo(
@@ -181,7 +199,7 @@ export function Editor() {
     [tracks],
   );
   const activeVisualClips = useMemo(
-    () => tracks.flatMap((track, trackIndex) => track.kind === 'video'
+    () => tracks.flatMap((track, trackIndex) => track.kind === 'video' && !track.muted
       ? track.clips.filter((clip) => currentTime >= clip.start && currentTime < clip.start + clip.duration).map((clip) => ({ clip, trackIndex }))
       : []),
     [tracks, currentTime],
@@ -193,11 +211,12 @@ export function Editor() {
     [tracks, currentTime],
   );
   const activeTextClips = useMemo(
-    () => tracks.flatMap((track) => track.kind === 'text'
+    () => tracks.flatMap((track) => track.kind === 'text' && !track.muted
       ? track.clips.filter((clip) => currentTime >= clip.start && currentTime < clip.start + clip.duration)
       : []),
     [tracks, currentTime],
   );
+  const captionsVisible = !tracks.find((track) => track.id === 'captions')?.muted;
   const currentCaption = useMemo(() => {
     const captionClips = tracks.find((track) => track.id === 'captions')?.clips ?? [];
     const clip = captionClips.find((item) => currentTime >= item.start && currentTime < item.start + item.duration) ?? captionClips[0];
@@ -223,17 +242,22 @@ export function Editor() {
     if (!playing) return;
     let frame = 0;
     let last = performance.now();
+    let accumulated = 0;
     const tick = (now: number) => {
-      const delta = Math.min(.1, (now - last) / 1000);
+      accumulated += Math.min(.1, (now - last) / 1000);
       last = now;
-      setCurrentTime((time) => {
-        const next = time + delta;
-        if (next >= TOTAL_DURATION) {
-          setPlaying(false);
-          return 0;
-        }
-        return next;
-      });
+      if (accumulated >= 1 / 30) {
+        const delta = accumulated;
+        accumulated = 0;
+        setCurrentTime((time) => {
+          const next = time + delta;
+          if (next >= TOTAL_DURATION) {
+            setPlaying(false);
+            return 0;
+          }
+          return next;
+        });
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -247,6 +271,34 @@ export function Editor() {
       return clip ? { ...caption, start: clip.start, end: clip.start + clip.duration, text: clip.text ?? clip.name } : caption;
     }));
   }, [tracks]);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('darja-studio-project-v2');
+      if (stored) {
+        const project = JSON.parse(stored);
+        if (Array.isArray(project.tracks)) setTracks(project.tracks);
+        if (Array.isArray(project.captions)) setCaptions(project.captions);
+        if (project.captionStyle) setCaptionStyle((style) => ({ ...style, ...project.captionStyle }));
+        if (Array.isArray(project.assets)) setAssets(project.assets);
+        if (typeof project.projectName === 'string') setProjectName(project.projectName);
+      }
+    } catch {
+      window.localStorage.removeItem('darja-studio-project-v2');
+    }
+    autosaveReady.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!autosaveReady.current) return;
+    setSaveState('saving');
+    const timer = window.setTimeout(() => {
+      const persistentAssets = assets.filter((asset) => !asset.id.startsWith('upload-') || asset.storageId).map((asset) => ({ ...asset, url: asset.storageId ? `/api/assets/${encodeURIComponent(asset.storageId)}` : asset.url }));
+      window.localStorage.setItem('darja-studio-project-v2', JSON.stringify({ version: 2, projectName, tracks, captions, captionStyle, assets: persistentAssets }));
+      setSaveState('saved');
+    }, 550);
+    return () => window.clearTimeout(timer);
+  }, [projectName, tracks, captions, captionStyle, assets]);
 
   const commitStyle = (patch: Partial<CaptionStyle>) => {
     setPastStyles((history) => [...history.slice(-29), captionStyle]);
@@ -362,6 +414,10 @@ export function Editor() {
     commitTimeline((current) => current.map((track) => track.id === trackId ? { ...track, locked: !track.locked } : track));
   };
 
+  const toggleTrackMute = (trackId: string) => {
+    commitTimeline((current) => current.map((track) => track.id === trackId ? { ...track, muted: !track.muted } : track));
+  };
+
   const updateSelectedClip = (patch: Partial<TimelineClip>) => {
     if (!selectedClipId) return;
     commitTimeline((current) => current.map((track) => ({
@@ -447,33 +503,39 @@ export function Editor() {
     notify('Texte ajouté à la timeline');
   };
 
-  const addAssetToTimeline = (asset: MediaAsset) => {
+  const placeAssetOnTimeline = (asset: MediaAsset, requestedTrackId?: string, requestedStart = currentTime) => {
     const defaultDuration = asset.kind === 'image' ? 4 : 6;
     const duration = Math.min(TOTAL_DURATION, Math.max(.5, asset.duration ?? defaultDuration));
-    const start = Math.min(Math.max(0, currentTime), TOTAL_DURATION - duration);
+    const start = Math.min(Math.max(0, requestedStart), TOTAL_DURATION - duration);
     const clipId = `clip-${Date.now().toString(36)}`;
+    const requestedTrack = requestedTrackId ? tracks.find((track) => track.id === requestedTrackId) : undefined;
+    if (requestedTrack?.locked) { notify('Cette piste est verrouillée'); return; }
+    if (requestedTrack && asset.kind === 'audio' && requestedTrack.kind !== 'audio') { notify('Dépose l’audio sur une piste audio'); return; }
+    if (requestedTrack && asset.kind !== 'audio' && requestedTrack.kind !== 'video') { notify('Dépose la vidéo ou l’image sur une piste vidéo'); return; }
+
+    const fallbackTrack = asset.kind === 'audio' ? tracks.find((track) => track.kind === 'audio' && !track.locked) : tracks.find((track) => track.kind === 'video' && !track.locked);
+    const destination = requestedTrack ?? fallbackTrack;
     const audioTrackId = `audio-${Date.now().toString(36)}`;
     commitTimeline((current) => {
-      if (asset.kind === 'audio') {
+      if (!destination && asset.kind === 'audio') {
         const audioNumber = current.filter((track) => track.kind === 'audio').length + 1;
-        return [...current, {
-          id: audioTrackId,
-          name: `Audio ${audioNumber}`,
-          kind: 'audio',
-          locked: false,
-          muted: false,
-          clips: [{ id: clipId, trackId: audioTrackId, assetId: asset.id, kind: 'audio', name: asset.name, start, duration, sourceStart: 0, color: asset.color }],
-        }];
+        return [...current, { id: audioTrackId, name: `Audio ${audioNumber}`, kind: 'audio', locked: false, muted: false, clips: [{ id: clipId, trackId: audioTrackId, assetId: asset.id, kind: 'audio', name: asset.name, start, duration, sourceStart: 0, color: asset.color, volume: 1 }] }];
       }
-      const destination = current.find((track) => track.kind === 'video' && !track.locked);
       if (!destination) return current;
       return current.map((track) => track.id === destination.id ? {
         ...track,
-        clips: [...track.clips, { id: clipId, trackId: track.id, assetId: asset.id, kind: asset.kind, name: asset.name, start, duration, sourceStart: 0, color: asset.color }],
+        clips: [...track.clips, { id: clipId, trackId: track.id, assetId: asset.id, kind: asset.kind, name: asset.name, start, duration, sourceStart: 0, color: asset.color, x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, volume: 1 }].sort((a, b) => a.start - b.start),
       } : track);
     });
     setSelectedClipId(clipId);
-    notify(`${asset.name} ajouté à ${formatTime(start)}`);
+    setCurrentTime(start);
+    notify(`${asset.name} déposé sur ${destination?.name ?? 'une nouvelle piste'} à ${formatTime(start)}`);
+  };
+
+  const addAssetToTimeline = (asset: MediaAsset) => placeAssetOnTimeline(asset);
+  const dropAssetOnTimeline = (assetId: string, trackId: string, time: number) => {
+    const asset = assets.find((item) => item.id === assetId);
+    if (asset) placeAssetOnTimeline(asset, trackId, time);
   };
 
   const togglePlayback = async () => {
@@ -514,27 +576,23 @@ export function Editor() {
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
-  const onUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    if (!files.length) return;
+  const importFiles = async (files: File[]) => {
+    const accepted = files.filter((file) => file.type.startsWith('video') || file.type.startsWith('audio') || file.type.startsWith('image'));
+    if (!accepted.length) {
+      notify('Aucun fichier vidéo, image ou audio compatible');
+      return;
+    }
     const batchId = Date.now();
-    const localEntries = files.map((file, index) => {
+    const localEntries = accepted.map((file, index) => {
       const kind: MediaAsset['kind'] = file.type.startsWith('video') ? 'video' : file.type.startsWith('audio') ? 'audio' : 'image';
       const url = URL.createObjectURL(file);
-      const asset: MediaAsset = {
-        id: `upload-${batchId}-${index}`,
-        name: file.name,
-        kind,
-        url,
-        color: PALETTE[(assets.length + index) % PALETTE.length],
-      };
+      const asset: MediaAsset = { id: `upload-${batchId}-${index}`, name: file.name, kind, url, color: PALETTE[(assets.length + index) % PALETTE.length] };
       return { file, asset, localUrl: url };
     });
     setAssets((list) => [...localEntries.map((entry) => entry.asset), ...list]);
     const firstVideo = localEntries.find((entry) => entry.asset.kind === 'video');
     if (firstVideo) setActiveVideoId(firstVideo.asset.id);
-    notify(`${files.length} média${files.length > 1 ? 's' : ''} importé${files.length > 1 ? 's' : ''} · stockage en cours`);
-    event.target.value = '';
+    notify(`${accepted.length} média${accepted.length > 1 ? 's' : ''} importé${accepted.length > 1 ? 's' : ''} · stockage en cours`);
 
     await Promise.all(localEntries.map(async ({ file, asset, localUrl }) => {
       const duration = await probeMediaDuration(file, localUrl);
@@ -544,12 +602,7 @@ export function Editor() {
         const response = await fetch('/api/assets', { method: 'POST', body: formData });
         if (!response.ok) throw new Error('upload failed');
         const uploaded = await response.json();
-        setAssets((list) => list.map((item) => item.id === asset.id ? {
-          ...item,
-          storageId: uploaded.storageId,
-          url: uploaded.url,
-          duration,
-        } : item));
+        setAssets((list) => list.map((item) => item.id === asset.id ? { ...item, storageId: uploaded.storageId, url: uploaded.url, duration } : item));
         URL.revokeObjectURL(localUrl);
       } catch {
         setAssets((list) => list.map((item) => item.id === asset.id ? { ...item, duration } : item));
@@ -557,6 +610,12 @@ export function Editor() {
       }
     }));
     notify('Médias prêts pour la preview et le rendu');
+  };
+
+  const onUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    void importFiles(files);
   };
 
   const updateCurrentCaption = (text: string) => {
@@ -602,7 +661,7 @@ export function Editor() {
           fps: settings?.fps ?? 30,
           quality: settings?.quality ?? 'high',
           codec: 'h264',
-          captions,
+          captions: captionsVisible ? captions : [],
           captionStyle,
           tracks,
           assets: assets.map(({ id, name, kind, duration, storageId }) => ({ id, name, kind, duration, storageId })),
@@ -646,6 +705,20 @@ export function Editor() {
     notify('Projet téléchargé');
   };
 
+  const resetProject = () => {
+    if (!window.confirm('Réinitialiser le projet et supprimer les modifications locales ?')) return;
+    window.localStorage.removeItem('darja-studio-project-v2');
+    setTracks(cloneTracks(initialTimelineTracks));
+    setCaptions(demoCaptions);
+    setCaptionStyle(INITIAL_STYLE);
+    setAssets(starterAssets);
+    setProjectName('Nouveau projet Darija');
+    setSelectedClipId('clip-intro');
+    setCurrentTime(0);
+    setAccountOpen(false);
+    notify('Projet réinitialisé');
+  };
+
   const captionText = scriptMode === 'arabic' ? currentCaption.textAr || currentCaption.text : currentCaption.text;
   const captionProgress = Math.min(1, Math.max(0, (currentTime - currentCaption.start) / .24));
   const captionFont = captionStyle.fontFamily === 'sans' ? 'Inter, sans-serif' : captionStyle.fontFamily === 'rounded' ? 'Arial Rounded MT Bold, Inter, sans-serif' : 'Impact, Arial Black, sans-serif';
@@ -663,7 +736,7 @@ export function Editor() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand-block">
-          <button className="icon-button subtle" title="Retour" onClick={() => window.history.back()}>
+          <button className="icon-button subtle" title="Retour au mode automatique" onClick={onBackToEasy}>
             <ArrowLeft size={18} />
           </button>
           <div className="brand-mark"><span>D</span></div>
@@ -680,7 +753,7 @@ export function Editor() {
             value={projectName}
             onChange={(event) => setProjectName(event.target.value)}
           />
-          <div className="save-state"><Cloud size={13} /> Sauvegardé</div>
+          <div className={`save-state ${saveState}`}><Cloud size={13} /> {saveState === 'saving' ? 'Enregistrement…' : 'Sauvegardé automatiquement'}</div>
         </div>
 
         <div className="top-actions">
@@ -691,13 +764,14 @@ export function Editor() {
             <Redo2 size={18} />
           </button>
           <span className="top-divider" />
+          <button className="script-top-button" onClick={() => setScriptOpen(true)}><Sparkles size={16} /> Script IA</button>
           <button className="preview-button" onClick={toggleFullscreen}><Eye size={17} /> Aperçu</button>
           <button className="export-button" onClick={() => { setExportOpen(true); setRenderStatus('idle'); }}>
             <Download size={17} /> Exporter
           </button>
           <div className="account-wrap">
             <button className="avatar" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen}>Y</button>
-            {accountOpen && <div className="account-menu"><strong>Projet local</strong><span>Darja Studio self-hosted</span><button onClick={() => { downloadProject(); setAccountOpen(false); }}><Download size={14} /> Télécharger le projet</button><button onClick={() => { setHelpOpen(true); setAccountOpen(false); }}><CircleHelp size={14} /> Ouvrir l’aide</button></div>}
+            {accountOpen && <div className="account-menu"><strong>Projet local</strong><span>Darja Studio self-hosted</span><button onClick={() => { downloadProject(); setAccountOpen(false); }}><Download size={14} /> Télécharger le projet</button><button onClick={() => { setHelpOpen(true); setAccountOpen(false); }}><CircleHelp size={14} /> Ouvrir l’aide</button><button className="danger-menu-item" onClick={resetProject}><RotateCcw size={14} /> Réinitialiser le projet</button></div>}
           </div>
         </div>
       </header>
@@ -721,7 +795,14 @@ export function Editor() {
           </div>
         </nav>
 
-        <aside className="asset-panel">
+        <aside
+          className={`asset-panel ${assetDragActive ? 'file-drag-active' : ''}`}
+          onDragEnter={(event) => { if (Array.from(event.dataTransfer.types).includes('Files')) { event.preventDefault(); setAssetDragActive(true); } }}
+          onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes('Files')) event.preventDefault(); }}
+          onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setAssetDragActive(false); }}
+          onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); setAssetDragActive(false); void importFiles(Array.from(event.dataTransfer.files)); } }}
+        >
+          {assetDragActive && <div className="asset-drop-overlay"><UploadCloud size={26} /><strong>Dépose tes fichiers</strong><span>Vidéos, images ou audio</span></div>}
           <PanelContent
             activeTab={activeTab}
             assets={assets}
@@ -781,13 +862,13 @@ export function Editor() {
                 })}
                 {activeTextClips.map((clip) => <TextClipLayer key={clip.id} clip={clip} currentTime={currentTime} selected={clip.id === selectedClipId} onSelect={() => setSelectedClipId(clip.id)} />)}
                 <div className="safe-zone" />
-                <div
+                {captionsVisible && <div
                   dir={scriptMode === 'arabic' ? 'rtl' : 'ltr'}
                   className={`caption-on-canvas animation-${captionStyle.animation ?? 'pop'} ${captionStyle.shadow ? 'with-shadow' : ''} ${captionStyle.uppercase ? 'is-uppercase' : ''}`}
                 >
                   <span>{captionText}</span>
                   <i />
-                </div>
+                </div>}
                 <div className="canvas-tag"><Sparkles size={11} /> Auto captions</div>
               </div>
             </div>
@@ -839,6 +920,8 @@ export function Editor() {
           removeSelectedClip={removeSelectedClip}
           addVideoTrack={addVideoTrack}
           toggleTrackLock={toggleTrackLock}
+          toggleTrackMute={toggleTrackMute}
+          onDropAsset={dropAssetOnTimeline}
           undo={undo}
           redo={redo}
           canUndo={Boolean(timelinePast.length || pastStyles.length)}
@@ -863,6 +946,249 @@ export function Editor() {
       {toast && <div className="toast"><Check size={16} />{toast}</div>}
     </div>
   );
+}
+
+type AutoScriptResult = {
+  script: string;
+  scriptAr: string;
+  captions: Caption[];
+  engine: string;
+};
+
+type AutoProject = {
+  version: number;
+  projectName: string;
+  tracks: TimelineTrack[];
+  captions: Caption[];
+  captionStyle: CaptionStyle;
+  assets: MediaAsset[];
+};
+
+function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
+  const [step, setStep] = useState(1);
+  const [topic, setTopic] = useState('');
+  const [tone, setTone] = useState<'energetic' | 'educational' | 'sales' | 'story'>('energetic');
+  const [duration, setDuration] = useState(30);
+  const [alphabet, setAlphabet] = useState<'latin' | 'arabic'>('latin');
+  const [script, setScript] = useState<AutoScriptResult | null>(null);
+  const [scriptLoading, setScriptLoading] = useState(false);
+  const [visualAssets, setVisualAssets] = useState<MediaAsset[]>([]);
+  const [voiceAsset, setVoiceAsset] = useState<MediaAsset | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
+  const [template, setTemplate] = useState<'impact' | 'clean' | 'neon'>('impact');
+  const [project, setProject] = useState<AutoProject | null>(null);
+  const [assembling, setAssembling] = useState(false);
+  const [assemblyProgress, setAssemblyProgress] = useState(0);
+  const [rendering, setRendering] = useState(false);
+  const [message, setMessage] = useState('');
+  const visualInputRef = useRef<HTMLInputElement>(null);
+  const voiceInputRef = useRef<HTMLInputElement>(null);
+
+  const uploadOne = async (file: File, index: number): Promise<MediaAsset> => {
+    const kind: MediaAsset['kind'] = file.type.startsWith('video') ? 'video' : file.type.startsWith('audio') ? 'audio' : 'image';
+    const localUrl = URL.createObjectURL(file);
+    const id = `auto-${Date.now()}-${index}`;
+    const durationValue = await probeMediaDuration(file, localUrl);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const response = await fetch('/api/assets', { method: 'POST', body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Upload impossible');
+      URL.revokeObjectURL(localUrl);
+      return { id, name: file.name, kind, url: data.url, storageId: data.storageId, duration: durationValue, color: PALETTE[index % PALETTE.length] };
+    } catch {
+      return { id, name: file.name, kind, url: localUrl, duration: durationValue, color: PALETTE[index % PALETTE.length] };
+    }
+  };
+
+  const addVisualFiles = async (files: File[]) => {
+    const compatible = files.filter((file) => file.type.startsWith('video') || file.type.startsWith('image'));
+    if (!compatible.length) { setMessage('Ajoute au moins une vidéo ou une image.'); return; }
+    setUploading(true);
+    setMessage('Import des médias…');
+    const uploaded = await Promise.all(compatible.map((file, index) => uploadOne(file, visualAssets.length + index)));
+    setVisualAssets((items) => [...items, ...uploaded]);
+    setUploading(false);
+    setMessage(`${uploaded.length} média${uploaded.length > 1 ? 's' : ''} prêt${uploaded.length > 1 ? 's' : ''}.`);
+  };
+
+  const addVoiceFile = async (file?: File) => {
+    if (!file || !file.type.startsWith('audio')) { setMessage('Choisis un fichier audio compatible.'); return; }
+    setUploading(true);
+    setMessage('Import de la voix off…');
+    const uploaded = await uploadOne(file, 5);
+    setVoiceAsset(uploaded);
+    setUploading(false);
+    setMessage('Voix off prête.');
+  };
+
+  const generateScript = async () => {
+    if (topic.trim().length < 3) return;
+    setScriptLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic, tone, duration }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Génération impossible');
+      setScript(data);
+      setMessage('Script prêt. Tu peux le relire puis continuer.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Génération impossible');
+    } finally {
+      setScriptLoading(false);
+    }
+  };
+
+  const buildProject = () => {
+    if (!script || !visualAssets.length) return null;
+    const projectDuration = duration;
+    const styleMap: Record<typeof template, CaptionStyle> = {
+      impact: { ...INITIAL_STYLE, preset: 'impact', fontFamily: 'impact', animation: 'pop' },
+      clean: { ...INITIAL_STYLE, preset: 'minimal', fontFamily: 'sans', fontSize: 44, accentColor: '#ffffff', animation: 'fade', shadow: true },
+      neon: { ...INITIAL_STYLE, preset: 'neon', fontFamily: 'rounded', textColor: '#f8ff3e', accentColor: '#9a68ff', backgroundColor: '#251643', animation: 'pop' },
+    };
+    const outputCaptions = script.captions.map((caption) => ({ ...caption, text: alphabet === 'arabic' ? caption.textAr ?? caption.text : caption.text }));
+    const clipCount = Math.max(visualAssets.length, Math.ceil(projectDuration / 5));
+    const segmentDuration = projectDuration / clipCount;
+    const visualClips: TimelineClip[] = Array.from({ length: clipCount }, (_, index) => {
+      const asset = visualAssets[index % visualAssets.length];
+      return {
+        id: `auto-visual-${index}`,
+        trackId: 'video-main',
+        assetId: asset.id,
+        kind: asset.kind,
+        name: asset.name,
+        start: Number((index * segmentDuration).toFixed(3)),
+        duration: Number(segmentDuration.toFixed(3)),
+        sourceStart: 0,
+        color: asset.color,
+        x: 0, y: 0, scale: 1, rotation: 0, opacity: 1,
+        transitionIn: (['fade', 'slide', 'zoom'] as TransitionType[])[index % 3],
+        transitionDuration: .38,
+        effect: template === 'neon' ? 'glow' : template === 'clean' ? 'enhance' : 'none',
+      };
+    });
+    const tracks: TimelineTrack[] = [
+      { id: 'video-main', name: 'Montage automatique', kind: 'video', locked: false, muted: false, clips: visualClips },
+      { id: 'captions', name: 'Captions Darija', kind: 'caption', locked: false, muted: false, clips: outputCaptions.map((caption) => ({ id: `timeline-${caption.id}`, trackId: 'captions', kind: 'caption', name: caption.text, text: caption.text, start: caption.start, duration: caption.end - caption.start, sourceStart: 0, color: '#6658b8' })) },
+    ];
+    if (voiceAsset) tracks.push({ id: 'voice', name: 'Voix off', kind: 'audio', locked: false, muted: false, clips: [{ id: 'clip-voice', trackId: 'voice', assetId: voiceAsset.id, kind: 'audio', name: voiceAsset.name, start: 0, duration: Math.min(projectDuration, voiceAsset.duration ?? projectDuration), sourceStart: 0, color: '#23896d', volume: 1, noiseReduction: true }] });
+    return { version: 2, projectName: topic.slice(0, 60), tracks, captions: outputCaptions, captionStyle: styleMap[template], assets: [...visualAssets, ...(voiceAsset ? [voiceAsset] : [])] } satisfies AutoProject;
+  };
+
+  const assembleProject = async () => {
+    const nextProject = buildProject();
+    if (!nextProject) return;
+    setAssembling(true);
+    setAssemblyProgress(14);
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    setAssemblyProgress(46);
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    window.localStorage.setItem('darja-studio-project-v2', JSON.stringify(nextProject));
+    setAssemblyProgress(78);
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    setProject(nextProject);
+    setAssemblyProgress(100);
+    setAssembling(false);
+    setMessage('Projet automatique prêt. Tu peux l’exporter ou l’affiner.');
+  };
+
+  const exportProject = async () => {
+    const readyProject = project ?? buildProject();
+    if (!readyProject) return;
+    setRendering(true);
+    setMessage('Rendu MP4 en cours…');
+    try {
+      const response = await fetch('/api/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectName: readyProject.projectName, duration, format: '1080x1920', fps: 30, quality: 'high', tracks: readyProject.tracks, captions: readyProject.captions, captionStyle: readyProject.captionStyle, assets: readyProject.assets.map(({ id, name, kind, duration: assetDuration, storageId }) => ({ id, name, kind, duration: assetDuration, storageId })) }) });
+      if (!response.ok) throw new Error(await response.text());
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${readyProject.projectName.toLowerCase().replace(/[^a-z0-9]+/gi, '-') || 'darja-video'}.mp4`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setMessage('Vidéo exportée avec succès.');
+    } catch {
+      setMessage('Le rendu a échoué. Vérifie que les médias ont fini leur upload.');
+    } finally {
+      setRendering(false);
+    }
+  };
+
+  const steps = [
+    { id: 1, label: 'Script', hint: 'Ton idée', icon: FileText, done: Boolean(script) },
+    { id: 2, label: 'Voix', hint: 'Audio optionnel', icon: Mic2, done: Boolean(voiceAsset) },
+    { id: 3, label: 'Médias', hint: 'Tes vidéos', icon: Clapperboard, done: visualAssets.length > 0 },
+    { id: 4, label: 'Style', hint: 'Générer', icon: Palette, done: Boolean(project) },
+  ];
+  const firstVisual = visualAssets[0];
+
+  return (
+    <div className="auto-app">
+      <header className="auto-header">
+        <div className="auto-brand"><div className="brand-mark"><span>D</span></div><span><strong>DARJA</strong><small>STUDIO</small></span></div>
+        <div className="auto-mode-pill"><Sparkles size={13} /> Montage automatique</div>
+        <button className="advanced-link" onClick={onOpenAdvanced}><SlidersHorizontal size={15} /> Éditeur avancé</button>
+      </header>
+
+      <main className="auto-main">
+        <section className="auto-intro"><span className="auto-kicker"><Rocket size={13} /> Simple, rapide, 100% Darija</span><h1>Men l’idée l vidéo.<br/><em>Bla ta3qid.</em></h1><p>Ajoute ton sujet, ta voix et tes médias. Darja Studio construit le montage automatiquement.</p></section>
+
+        <nav className="auto-steps" aria-label="Étapes de création">
+          {steps.map(({ id, label, hint, icon: Icon, done }, index) => <button key={id} className={`${step === id ? 'active' : ''} ${done ? 'done' : ''}`} onClick={() => setStep(id)}><i>{done ? <Check size={15} /> : <Icon size={16} />}</i><span><strong>{label}</strong><small>{hint}</small></span>{index < steps.length - 1 && <ChevronStep />}</button>)}
+        </nav>
+
+        <section className="auto-workspace">
+          <div className="auto-panel">
+            {step === 1 && <div className="auto-step-content script-step">
+              <div className="auto-section-title"><span>01</span><div><h2>Qu’est-ce que tu veux raconter ?</h2><p>Une phrase suffit. Le générateur écrit le reste en darija.</p></div></div>
+              <label className="auto-topic"><textarea value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Exemple : présenter ma nouvelle application de livraison…" maxLength={120}/><small>{topic.length}/120</small></label>
+              <div className="auto-options"><label>Ton<select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)}><option value="energetic">Énergique</option><option value="educational">Éducatif</option><option value="sales">Commercial</option><option value="story">Storytelling</option></select></label><label>Durée<select value={duration} onChange={(event) => setDuration(Number(event.target.value))}><option value="15">15 secondes</option><option value="30">30 secondes</option></select></label><label>Écriture<select value={alphabet} onChange={(event) => setAlphabet(event.target.value as typeof alphabet)}><option value="latin">Darija latin</option><option value="arabic">دارجة عربية</option></select></label></div>
+              <button className="auto-primary" onClick={generateScript} disabled={scriptLoading || topic.trim().length < 3}>{scriptLoading ? <><RotateCcw className="spin" size={17}/> Kaykteb…</> : <><Sparkles size={17}/> Générer mon script</>}</button>
+              {script && <div className="auto-script-result" dir={alphabet === 'arabic' ? 'rtl' : 'ltr'}><div><span><CheckCircle2 size={15}/> Script prêt</span><small>{script.captions.length} scènes · {duration}s</small></div><textarea value={alphabet === 'arabic' ? script.scriptAr : script.script} readOnly/><button onClick={() => setStep(2)}>Continuer vers la voix <ArrowRight size={15}/></button></div>}
+            </div>}
+
+            {step === 2 && <div className="auto-step-content">
+              <div className="auto-section-title"><span>02</span><div><h2>Ajoute ta voix off</h2><p>Importe la voix déjà générée sur ta plateforme. Cette étape reste optionnelle.</p></div></div>
+              {!voiceAsset ? <button className="auto-upload-zone voice-zone" onClick={() => voiceInputRef.current?.click()}><i><Mic2 size={25}/></i><strong>Importer la voix off</strong><span>MP3, WAV, M4A ou AAC</span></button> : <div className="voice-ready"><i><Volume2 size={22}/></i><div><strong>{voiceAsset.name}</strong><span>{voiceAsset.duration ? `${voiceAsset.duration.toFixed(1)} secondes` : 'Audio prêt'}</span></div><audio controls src={voiceAsset.url}/><button onClick={() => setVoiceAsset(null)}><Trash2 size={15}/></button></div>}
+              <input ref={voiceInputRef} type="file" hidden accept="audio/*" onChange={(event) => { void addVoiceFile(event.target.files?.[0]); event.target.value = ''; }}/>
+              <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(1)}><ArrowLeft size={15}/> Retour</button><button className="auto-primary compact" onClick={() => setStep(3)}>{voiceAsset ? 'Continuer' : 'Passer sans voix'} <ArrowRight size={15}/></button></div>
+            </div>}
+
+            {step === 3 && <div className="auto-step-content">
+              <div className="auto-section-title"><span>03</span><div><h2>Dépose tes vidéos</h2><p>L’ordre peut être changé ensuite dans l’éditeur avancé.</p></div></div>
+              <div className={`auto-upload-zone media-zone ${dropActive ? 'active' : ''}`} onClick={() => visualInputRef.current?.click()} onDragOver={(event) => { event.preventDefault(); setDropActive(true); }} onDragLeave={() => setDropActive(false)} onDrop={(event) => { event.preventDefault(); setDropActive(false); void addVisualFiles(Array.from(event.dataTransfer.files)); }}><i><UploadCloud size={27}/></i><strong>{uploading ? 'Import en cours…' : 'Glisse tes vidéos et images ici'}</strong><span>ou clique pour parcourir · jusqu’à 500 Mo par fichier</span></div>
+              <input ref={visualInputRef} type="file" hidden multiple accept="video/*,image/*" onChange={(event) => { void addVisualFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }}/>
+              {visualAssets.length > 0 && <div className="auto-media-list">{visualAssets.map((asset, index) => <div key={asset.id}><div>{asset.kind === 'image' && asset.url ? <img src={asset.url} alt=""/> : asset.kind === 'video' && asset.url ? <video src={asset.url} muted preload="metadata"/> : <Clapperboard size={18}/>}<span>{index + 1}</span></div><p>{asset.name}</p><button onClick={() => setVisualAssets((items) => items.filter((item) => item.id !== asset.id))}><X size={13}/></button></div>)}</div>}
+              <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(2)}><ArrowLeft size={15}/> Retour</button><button className="auto-primary compact" disabled={!visualAssets.length || uploading} onClick={() => setStep(4)}>Choisir le style <ArrowRight size={15}/></button></div>
+            </div>}
+
+            {step === 4 && <div className="auto-step-content style-step">
+              <div className="auto-section-title"><span>04</span><div><h2>Choisis le rythme</h2><p>Le style applique automatiquement captions, effets et transitions.</p></div></div>
+              <div className="auto-template-grid"><button className={template === 'impact' ? 'active impact' : 'impact'} onClick={() => setTemplate('impact')}><div><strong>IMPACT</strong><span>Énergique</span></div><small>Captions bold · cuts rapides</small></button><button className={template === 'clean' ? 'active clean' : 'clean'} onClick={() => setTemplate('clean')}><div><strong>Clean.</strong><span>Élégant</span></div><small>Minimal · transitions douces</small></button><button className={template === 'neon' ? 'active neon' : 'neon'} onClick={() => setTemplate('neon')}><div><strong>NEON</strong><span>Social</span></div><small>Glow · couleurs pop</small></button></div>
+              <div className="auto-summary"><div><FileText size={16}/><span><strong>{script ? `${script.captions.length} scènes` : 'Script manquant'}</strong><small>{duration} secondes</small></span></div><div><Mic2 size={16}/><span><strong>{voiceAsset ? 'Voix ajoutée' : 'Sans voix'}</strong><small>{voiceAsset?.name ?? 'Tu peux continuer'}</small></span></div><div><Clapperboard size={16}/><span><strong>{visualAssets.length} médias</strong><small>Montage automatique</small></span></div></div>
+              {!project ? <button className="auto-generate-video" onClick={assembleProject} disabled={!script || !visualAssets.length || assembling}>{assembling ? <><RotateCcw className="spin" size={18}/> Construction {assemblyProgress}%</> : <><Rocket size={18}/> Construire ma vidéo</>}</button> : <div className="auto-ready-actions"><div><CheckCircle2 size={21}/><span><strong>Ton montage est prêt</strong><small>Tu peux l’exporter directement ou modifier chaque détail.</small></span></div><button onClick={exportProject} disabled={rendering}><Download size={16}/>{rendering ? 'Rendu en cours…' : 'Exporter MP4'}</button><button onClick={onOpenAdvanced}><SlidersHorizontal size={16}/> Affiner le montage</button></div>}
+              <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(3)}><ArrowLeft size={15}/> Retour</button></div>
+            </div>}
+          </div>
+
+          <aside className="auto-preview-card">
+            <div className="auto-preview-head"><span><MonitorPlay size={14}/> Aperçu</span><small>9:16 · {duration}s</small></div>
+            <div className="auto-phone-preview">{firstVisual?.url ? (firstVisual.kind === 'image' ? <img src={firstVisual.url} alt=""/> : <video src={firstVisual.url} muted autoPlay loop playsInline/>) : <div className="auto-preview-empty"><Smartphone size={30}/><span>Ton aperçu apparaîtra ici</span></div>}<div className={`auto-caption-demo ${template}`}>{script ? (alphabet === 'arabic' ? script.captions[0]?.textAr : script.captions[0]?.text) : 'CAPTIONS DARIJA'}</div><i className="auto-phone-progress"/></div>
+            <div className="auto-preview-stats"><span><Sparkles size={13}/> Auto captions</span><span><Clapperboard size={13}/> Auto cuts</span></div>
+          </aside>
+        </section>
+        {message && <div className="auto-message"><Check size={14}/>{message}</div>}
+      </main>
+    </div>
+  );
+}
+
+function ChevronStep() {
+  return <span className="step-connector"><i/></span>;
 }
 
 function PanelContent({
@@ -929,18 +1255,20 @@ function PanelContent({
           <button className="upload-button" onClick={() => fileInputRef.current?.click()}><UploadCloud size={17} /> Importer des médias</button>
           <div className="search-box"><Search size={15} /><input value={mediaSearch} onChange={(event) => setMediaSearch(event.target.value)} placeholder="Rechercher vos médias" /></div>
           <div className="panel-tabs"><button className={mediaFilter === 'all' ? 'active' : ''} onClick={() => setMediaFilter('all')}>Tout</button><button className={mediaFilter === 'video' ? 'active' : ''} onClick={() => setMediaFilter('video')}>Vidéos</button><button className={mediaFilter === 'image' ? 'active' : ''} onClick={() => setMediaFilter('image')}>Images</button><button className={mediaFilter === 'audio' ? 'active' : ''} onClick={() => setMediaFilter('audio')}>Audio</button></div>
-          <p className="media-helper">Double-clique un média pour l’ajouter au curseur.</p>
+          <p className="media-helper">Glisse un média vers une piste, ou double-clique pour l’ajouter au curseur.</p>
           <div className="media-grid">
             <button className="media-add" onClick={() => fileInputRef.current?.click()}><ImagePlus size={23} /><span>Ajouter</span></button>
             {filteredAssets.map((asset) => (
               <button
                 key={asset.id}
                 className={`media-card ${activeVideoId === asset.id ? 'selected' : ''}`}
+                draggable
                 onClick={() => {
                   if (asset.kind === 'video' && asset.url) setActiveVideoId(asset.id);
                   else notify('Double-clique pour ajouter ce média à la timeline');
                 }}
                 onDoubleClick={() => addAssetToTimeline(asset)}
+                onDragStart={(event) => { event.dataTransfer.setData('application/x-darja-asset', asset.id); event.dataTransfer.effectAllowed = 'copy'; }}
               >
                 <div className="media-thumb" style={{ '--media-color': asset.color } as CSSProperties}>
                   {asset.url && asset.kind === 'image' ? <img src={asset.url} alt="" /> : asset.url && asset.kind === 'video' ? <video src={asset.url} muted /> : <Grid2X2 size={17} />}
@@ -1391,6 +1719,8 @@ function Timeline({
   removeSelectedClip,
   addVideoTrack,
   toggleTrackLock,
+  toggleTrackMute,
+  onDropAsset,
   undo,
   redo,
   canUndo,
@@ -1414,6 +1744,8 @@ function Timeline({
   removeSelectedClip: () => void;
   addVideoTrack: () => void;
   toggleTrackLock: (trackId: string) => void;
+  toggleTrackMute: (trackId: string) => void;
+  onDropAsset: (assetId: string, trackId: string, time: number) => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -1429,6 +1761,8 @@ function Timeline({
   };
 
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [dragOverTrackId, setDragOverTrackId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; clipId: string } | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement>(null);
   const selectedClip = useMemo(
     () => tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId) ?? null,
@@ -1517,6 +1851,14 @@ function Timeline({
     };
   }, [drag, currentTime, setTracks, snapping, zoom]);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('blur', close);
+    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('blur', close); };
+  }, [contextMenu]);
+
   const startDrag = (event: React.PointerEvent, clip: TimelineClip, track: TimelineTrack, mode: DragMode) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1593,6 +1935,13 @@ function Timeline({
                 </div>
                 <span>{track.name}</span>
                 <button
+                  title={track.muted ? 'Afficher / activer' : 'Masquer / couper'}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => toggleTrackMute(track.id)}
+                >
+                  {track.muted ? (track.kind === 'audio' ? <VolumeX size={12} /> : <EyeOff size={12} />) : (track.kind === 'audio' ? <Volume2 size={12} /> : <Eye size={12} />)}
+                </button>
+                <button
                   title={track.locked ? 'Déverrouiller' : 'Verrouiller'}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={() => toggleTrackLock(track.id)}
@@ -1601,8 +1950,18 @@ function Timeline({
                 </button>
               </div>
               <div
-                className={`track-content-v2 ${track.locked ? 'locked' : ''}`}
+                className={`track-content-v2 ${track.locked ? 'locked' : ''} ${track.muted ? 'muted' : ''} ${dragOverTrackId === track.id ? 'drop-target' : ''}`}
                 data-track-id={track.id}
+                onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDragOverTrackId(track.id); }}
+                onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragOverTrackId(null); }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const assetId = event.dataTransfer.getData('application/x-darja-asset');
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const time = Math.min(TOTAL_DURATION, Math.max(0, ((event.clientX - rect.left) / rect.width) * TOTAL_DURATION));
+                  setDragOverTrackId(null);
+                  if (assetId) onDropAsset(assetId, track.id, time);
+                }}
                 onPointerDown={(event) => {
                   if (event.target !== event.currentTarget) return;
                   setSelectedClipId(null);
@@ -1617,6 +1976,7 @@ function Timeline({
                     selected={clip.id === selectedClipId}
                     dragging={clip.id === drag?.clip.id}
                     onSelect={() => setSelectedClipId(clip.id)}
+                    onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setSelectedClipId(clip.id); setContextMenu({ x: Math.min(event.clientX, window.innerWidth - 200), y: Math.min(event.clientY, window.innerHeight - 115), clipId: clip.id }); }}
                     onStartDrag={startDrag}
                   />
                 ))}
@@ -1630,6 +1990,11 @@ function Timeline({
           </div>
         </div>
       </div>
+      {contextMenu && <div className="clip-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+        <button onClick={() => { splitSelectedClip(); setContextMenu(null); }}><Scissors size={14} /> Découper au curseur <kbd>S</kbd></button>
+        <button onClick={() => { duplicateSelectedClip(); setContextMenu(null); }}><Copy size={14} /> Dupliquer <kbd>Ctrl D</kbd></button>
+        <button className="danger" onClick={() => { removeSelectedClip(); setContextMenu(null); }}><Trash2 size={14} /> Supprimer <kbd>Suppr</kbd></button>
+      </div>}
     </section>
   );
 }
@@ -1640,6 +2005,7 @@ function TimelineClipView({
   selected,
   dragging,
   onSelect,
+  onContextMenu,
   onStartDrag,
 }: {
   clip: TimelineClip;
@@ -1647,6 +2013,7 @@ function TimelineClipView({
   selected: boolean;
   dragging: boolean;
   onSelect: () => void;
+  onContextMenu: (event: React.MouseEvent) => void;
   onStartDrag: (event: React.PointerEvent, clip: TimelineClip, track: TimelineTrack, mode: 'move' | 'trim-left' | 'trim-right') => void;
 }) {
   const clipStyle = {
@@ -1661,6 +2028,7 @@ function TimelineClipView({
       style={clipStyle}
       title={`${clip.name} — ${clip.duration.toFixed(2)}s`}
       onClick={(event) => { event.stopPropagation(); onSelect(); }}
+      onContextMenu={onContextMenu}
       onPointerDown={(event) => onStartDrag(event, clip, track, 'move')}
     >
       <button className="trim-handle left" aria-label="Raccourcir le début" onPointerDown={(event) => onStartDrag(event, clip, track, 'trim-left')}><i /></button>
@@ -1725,7 +2093,7 @@ function ScriptDialog({ onClose, onApply }: { onClose: () => void; onApply: (cap
 }
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
-  const shortcuts = [['Espace', 'Lecture / pause'], ['S', 'Découper au curseur'], ['Suppr', 'Supprimer le clip'], ['Ctrl + D', 'Dupliquer'], ['Ctrl + Z', 'Annuler'], ['Double-clic média', 'Ajouter à la timeline']];
+  const shortcuts = [['Espace', 'Lecture / pause'], ['S', 'Découper au curseur'], ['Suppr', 'Supprimer le clip'], ['Ctrl + D', 'Dupliquer'], ['Ctrl + Z', 'Annuler'], ['Glisser un média', 'Déposer sur une piste et un timecode'], ['Clic droit clip', 'Ouvrir les actions rapides'], ['Double-clic média', 'Ajouter au curseur']];
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="help-dialog" onMouseDown={(event) => event.stopPropagation()}><div className="export-head"><div><span><CircleHelp size={19} /></span><div><h2>Aide Darja Studio</h2><p>Commandes principales de l’éditeur</p></div></div><button className="icon-button" onClick={onClose}><X size={18} /></button></div><div className="help-body"><h3>Raccourcis</h3>{shortcuts.map(([key, action]) => <div className="shortcut-row" key={key}><kbd>{key}</kbd><span>{action}</span></div>)}<div className="help-note"><strong>Workflow conseillé</strong><span>Importe les médias, double-clique pour les ajouter, ajuste la timeline, génère les captions puis exporte le MP4.</span></div></div><div className="export-footer"><button className="render-button" onClick={onClose}><Check size={16} /> Compris</button></div></div></div>;
 }
 

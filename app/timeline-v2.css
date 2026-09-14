@@ -13,7 +13,7 @@
 .timeline-row-v2.ruler-row-v2 { height: 24px; position: sticky; top: 0; z-index: 14; }
 .timeline-row-v2.kind-caption { height: 40px; }
 .timeline-row-v2.kind-audio { height: 46px; }
-.track-label-v2 { width: 112px; height: 100%; padding: 0 8px; border-right: 1px solid #292b32; border-bottom: 1px solid #24262d; position: sticky; left: 0; z-index: 9; display: grid; grid-template-columns: 19px minmax(0, 1fr) 18px; align-items: center; gap: 5px; color: #858994; background: #17181d; font-size: 7.5px; }
+.track-label-v2 { width: 112px; height: 100%; padding: 0 8px; border-right: 1px solid #292b32; border-bottom: 1px solid #24262d; position: sticky; left: 0; z-index: 9; display: grid; grid-template-columns: 19px minmax(0, 1fr) 17px 17px; align-items: center; gap: 5px; color: #858994; background: #17181d; font-size: 7.5px; }
 .track-label-v2 > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track-label-v2 > button { width: 18px; height: 20px; padding: 0; border: 0; display: grid; place-items: center; color: #595e68; background: transparent; cursor: pointer; }
 .track-label-v2 > button:hover { color: #c8cad0; }
@@ -27,7 +27,10 @@
 .ruler-content-v2 > span.major i { height: 8px; background: #565a64; }
 .ruler-content-v2 > span.major { padding-top: 8px; }
 .track-content-v2 { height: 100%; border-bottom: 1px solid #25272e; position: relative; overflow: hidden; background-color: #131419; background-image: linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px); background-size: 6.25% 100%; cursor: crosshair; }
+.track-content-v2.muted { opacity: .42; filter: saturate(.25); }
 .track-content-v2.locked { opacity: .56; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.015) 0 4px, transparent 4px 8px); }
+.track-content-v2.drop-target { background-color: rgba(117,103,255,.1); box-shadow: inset 0 0 0 1px #8377ff, inset 0 0 22px rgba(117,103,255,.08); }
+.track-content-v2.drop-target::after { content: 'Déposer à ce timecode'; position: absolute; z-index: 20; right: 9px; top: 50%; transform: translateY(-50%); padding: 3px 6px; border-radius: 4px; color: #c9c4ff; background: rgba(65,53,151,.72); font-size: 6.5px; pointer-events: none; }
 .empty-track-hint { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: #3e424b; font-size: 7px; pointer-events: none; }
 .timeline-clip-v2 { height: calc(100% - 8px); min-width: 6px; top: 4px; border: 1px solid color-mix(in srgb, var(--clip-color), white 11%); border-radius: 4px; position: absolute; z-index: 2; overflow: hidden; color: white; background: linear-gradient(145deg, color-mix(in srgb, var(--clip-color), white 5%), color-mix(in srgb, var(--clip-color), #0b0c0f 17%)); box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); cursor: grab; touch-action: none; }
 .timeline-clip-v2:hover { filter: brightness(1.08); }
@@ -50,6 +53,11 @@
 .timeline-clip-v2.selected .trim-handle { display: flex; }
 .playhead-v2 { width: 1px; top: 0; bottom: 0; z-index: 12; position: absolute; pointer-events: none; background: #ff6046; box-shadow: 0 0 5px rgba(255,67,45,.42); }
 .playhead-v2 i { width: 9px; height: 8px; position: absolute; top: 0; left: -4px; border-radius: 2px 2px 5px 5px; background: #ff6046; }
+.clip-context-menu { width: 190px; padding: 5px; border: 1px solid #3b3e47; border-radius: 8px; position: fixed; z-index: 200; background: #22242a; box-shadow: 0 14px 40px rgba(0,0,0,.5); }
+.clip-context-menu button { width: 100%; height: 31px; padding: 0 7px; border: 0; border-radius: 5px; display: grid; grid-template-columns: 21px 1fr auto; align-items: center; color: #c0c3ca; background: transparent; font-size: 8px; text-align: left; cursor: pointer; }
+.clip-context-menu button:hover { color: white; background: #2d2f36; }
+.clip-context-menu button.danger { color: #e58b83; }
+.clip-context-menu kbd { color: #656a75; font: 6.5px ui-monospace, monospace; }
 .timeline-dragging, .timeline-dragging * { cursor: grabbing !important; user-select: none !important; }
 @media (max-width: 1250px) {
   .selection-readout { display: none; }

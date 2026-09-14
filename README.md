@@ -1,6 +1,6 @@
 # Darja Video Studio
 
-Éditeur vidéo web autonome en darija, construit avec Next.js, React et un moteur FFmpeg self-hosted.
+Plateforme de création vidéo en darija avec deux expériences : un workflow automatique simple par défaut et un éditeur multipiste avancé. Construite avec Next.js, React et un moteur FFmpeg self-hosted.
 
 ## Démarrage
 
@@ -11,13 +11,21 @@ npm run dev
 
 ## Fonctionnalités actives
 
-- import local puis stockage self-hosted des vidéos, images et pistes audio ;
+- mode automatique par étapes : script → voix → médias → style → génération ;
+- interface responsive dédiée aux ordinateurs, tablettes et mobiles ;
+- génération d’un projet/timeline complète en un clic ;
+- export MP4 direct ou ouverture dans l’éditeur avancé ;
+- import local par bouton ou drag-and-drop depuis l’ordinateur, puis stockage self-hosted ;
+- drag-and-drop d’un média vers une piste et un timecode précis ;
+- autosave/restauration du projet dans le navigateur ;
+- streaming HTTP Range des médias lourds sans lecture complète en mémoire ;
 - preview 9:16 composée depuis les clips réellement actifs sur la timeline ;
 - synchronisation du temps global, des trims et des médias ;
 - véritable timeline multipiste interactive ;
 - sélection, déplacement horizontal et déplacement entre pistes compatibles ;
 - trim non destructif avec `sourceStart`, split, duplication et suppression ;
-- snapping magnétique, zoom, verrouillage et ajout de pistes ;
+- snapping magnétique, zoom, verrouillage, mute/visible et ajout de pistes ;
+- menu clic droit sur les clips avec split, duplication et suppression ;
 - raccourcis : espace, S, Suppr, Ctrl/Cmd+D et Ctrl/Cmd+Z ;
 - générateur local de scripts darija par sujet, ton et durée ;
 - sortie séparée en alphabet latin ou arabe, sans mélange d’alphabets ;

@@ -98,9 +98,9 @@ export async function renderVideo(payload: RenderPayload) {
   const height = Math.round(number(formatMatch?.[2], 1920, 360, 1920) / 2) * 2;
   const tracks = payload.tracks ?? [];
   const assets = new Map((payload.assets ?? []).map((asset) => [asset.id, asset]));
-  const visualClips = tracks.filter((track) => track.kind === 'video').flatMap((track) => track.clips).filter((clip) => clip.kind === 'video' || clip.kind === 'image');
+  const visualClips = tracks.filter((track) => track.kind === 'video' && !track.muted).flatMap((track) => track.clips).filter((clip) => clip.kind === 'video' || clip.kind === 'image');
   const audioClips = tracks.filter((track) => track.kind === 'audio' && !track.muted).flatMap((track) => track.clips).filter((clip) => clip.kind === 'audio');
-  const textEvents: CaptionInput[] = tracks.filter((track) => track.kind === 'text').flatMap((track) => track.clips).map((clip) => ({ start: clip.start, end: clip.start + clip.duration, text: clip.text ?? clip.name }));
+  const textEvents: CaptionInput[] = tracks.filter((track) => track.kind === 'text' && !track.muted).flatMap((track) => track.clips).map((clip) => ({ start: clip.start, end: clip.start + clip.duration, text: clip.text ?? clip.name }));
   const mediaClips = [...visualClips, ...audioClips];
   const paths = new Map<string, string>();
   for (const clip of mediaClips) {

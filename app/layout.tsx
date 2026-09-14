@@ -3,6 +3,7 @@ import './globals.css';
 import './timeline-v2.css';
 import './composition.css';
 import './interactions.css';
+import './auto-studio.css';
 
 export const metadata: Metadata = {
   title: 'Darja Studio — Éditeur vidéo',
