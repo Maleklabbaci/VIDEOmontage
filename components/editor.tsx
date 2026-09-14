@@ -3,7 +3,6 @@
 import {
   ArrowLeft,
   Check,
-  ChevronDown,
   CircleHelp,
   Cloud,
   Copy,
@@ -14,13 +13,11 @@ import {
   FolderUp,
   Grid2X2,
   ImagePlus,
-  Languages,
   Lock,
   LockOpen,
   Magnet,
   Maximize2,
   Mic2,
-  MoreHorizontal,
   MousePointer2,
   Move,
   Pause,
@@ -28,7 +25,6 @@ import {
   Plus,
   Redo2,
   RotateCcw,
-  RotateCw,
   Scissors,
   Search,
   Settings2,
@@ -41,7 +37,6 @@ import {
   Undo2,
   UploadCloud,
   Volume2,
-  WandSparkles,
   X,
   ZoomIn,
   ZoomOut,
@@ -73,6 +68,8 @@ const INITIAL_STYLE: CaptionStyle = {
   position: 77,
   uppercase: true,
   shadow: true,
+  fontFamily: 'impact',
+  animation: 'pop',
 };
 
 const PRESETS: Array<{
@@ -165,15 +162,23 @@ export function Editor() {
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('Démo produit — Darija');
   const [exportOpen, setExportOpen] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [renderStatus, setRenderStatus] = useState<'idle' | 'sending' | 'ready' | 'error'>('idle');
   const [renderJob, setRenderJob] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedTimelineClip = useMemo(
     () => tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId) ?? null,
     [tracks, selectedClipId],
+  );
+  const voiceClip = useMemo(
+    () => tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'clip-voice') ?? null,
+    [tracks],
   );
   const activeVisualClips = useMemo(
     () => tracks.flatMap((track, trackIndex) => track.kind === 'video'
@@ -365,6 +370,10 @@ export function Editor() {
     })));
   };
 
+  const updateVoiceClip = (patch: Partial<TimelineClip>) => {
+    commitTimeline((current) => current.map((track) => ({ ...track, clips: track.clips.map((clip) => clip.id === 'clip-voice' ? { ...clip, ...patch } : clip) })));
+  };
+
   const applyTransition = (transition: TransitionType) => {
     if (!selectedTimelineClip || (selectedTimelineClip.kind !== 'video' && selectedTimelineClip.kind !== 'image')) {
       notify('Sélectionne d’abord un clip vidéo ou image');
@@ -475,6 +484,11 @@ export function Editor() {
     setCurrentTime(Math.min(TOTAL_DURATION, Math.max(0, time)));
   };
 
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else if (stageRef.current?.requestFullscreen) await stageRef.current.requestFullscreen();
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -553,7 +567,29 @@ export function Editor() {
     } : track));
   };
 
-  const createRenderJob = async () => {
+  const applyGeneratedScript = (generatedCaptions: Caption[]) => {
+    setCaptions(generatedCaptions);
+    setTracks((current) => current.map((track) => track.id === 'captions' ? {
+      ...track,
+      clips: generatedCaptions.map((caption) => ({
+        id: `timeline-${caption.id}`,
+        trackId: 'captions',
+        kind: 'caption' as const,
+        name: caption.text,
+        text: caption.text,
+        start: caption.start,
+        duration: caption.end - caption.start,
+        sourceStart: 0,
+        color: '#6658b8',
+      })),
+    } : track));
+    setCurrentTime(0);
+    setSelectedClipId(`timeline-${generatedCaptions[0]?.id ?? ''}`);
+    setScriptOpen(false);
+    notify('Script généré et captions ajoutées à la timeline');
+  };
+
+  const createRenderJob = async (settings?: { format: string; fps: number; quality: 'standard' | 'high' | 'maximum'; fileName: string }) => {
     setRenderStatus('sending');
     try {
       const response = await fetch('/api/render', {
@@ -562,8 +598,9 @@ export function Editor() {
         body: JSON.stringify({
           projectName,
           duration: TOTAL_DURATION,
-          format: '1080x1920',
-          fps: 30,
+          format: settings?.format ?? '1080x1920',
+          fps: settings?.fps ?? 30,
+          quality: settings?.quality ?? 'high',
           codec: 'h264',
           captions,
           captionStyle,
@@ -576,7 +613,7 @@ export function Editor() {
       const url = URL.createObjectURL(video);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `${projectName.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'darja-video'}.mp4`;
+      anchor.download = settings?.fileName?.endsWith('.mp4') ? settings.fileName : `${settings?.fileName || projectName.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'darja-video'}.mp4`;
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 2000);
       setRenderJob(`${(video.size / 1024 / 1024).toFixed(1)} Mo`);
@@ -610,19 +647,23 @@ export function Editor() {
   };
 
   const captionText = scriptMode === 'arabic' ? currentCaption.textAr || currentCaption.text : currentCaption.text;
+  const captionProgress = Math.min(1, Math.max(0, (currentTime - currentCaption.start) / .24));
+  const captionFont = captionStyle.fontFamily === 'sans' ? 'Inter, sans-serif' : captionStyle.fontFamily === 'rounded' ? 'Arial Rounded MT Bold, Inter, sans-serif' : 'Impact, Arial Black, sans-serif';
   const captionCss: CSSProperties = {
     '--caption-color': captionStyle.textColor,
     '--caption-accent': captionStyle.accentColor,
     '--caption-bg': captionStyle.backgroundColor,
     '--caption-size': `${captionStyle.fontSize}px`,
     '--caption-position': `${captionStyle.position}%`,
+    '--caption-font': captionFont,
+    '--caption-progress': captionProgress,
   } as CSSProperties;
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="brand-block">
-          <button className="icon-button subtle" title="Retour">
+          <button className="icon-button subtle" title="Retour" onClick={() => window.history.back()}>
             <ArrowLeft size={18} />
           </button>
           <div className="brand-mark"><span>D</span></div>
@@ -650,11 +691,14 @@ export function Editor() {
             <Redo2 size={18} />
           </button>
           <span className="top-divider" />
-          <button className="preview-button"><Eye size={17} /> Aperçu</button>
+          <button className="preview-button" onClick={toggleFullscreen}><Eye size={17} /> Aperçu</button>
           <button className="export-button" onClick={() => { setExportOpen(true); setRenderStatus('idle'); }}>
             <Download size={17} /> Exporter
           </button>
-          <button className="avatar">Y</button>
+          <div className="account-wrap">
+            <button className="avatar" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen}>Y</button>
+            {accountOpen && <div className="account-menu"><strong>Projet local</strong><span>Darja Studio self-hosted</span><button onClick={() => { downloadProject(); setAccountOpen(false); }}><Download size={14} /> Télécharger le projet</button><button onClick={() => { setHelpOpen(true); setAccountOpen(false); }}><CircleHelp size={14} /> Ouvrir l’aide</button></div>}
+          </div>
         </div>
       </header>
 
@@ -673,7 +717,7 @@ export function Editor() {
             ))}
           </div>
           <div className="rail-bottom">
-            <button className="rail-item"><CircleHelp size={20} /><span>Aide</span></button>
+            <button className="rail-item" onClick={() => setHelpOpen(true)}><CircleHelp size={20} /><span>Aide</span></button>
           </div>
         </nav>
 
@@ -696,6 +740,9 @@ export function Editor() {
             applyTransition={applyTransition}
             applyEffect={applyEffect}
             applyTemplate={applyTemplate}
+            openScriptGenerator={() => setScriptOpen(true)}
+            voiceClip={voiceClip}
+            updateVoiceClip={updateVoiceClip}
             selectVoiceTrack={() => { setSelectedClipId('clip-voice'); seek(0); }}
             notify={notify}
           />
@@ -704,16 +751,16 @@ export function Editor() {
 
         <main className="workspace">
           <div className="workspace-bar">
-            <button className="canvas-select"><MousePointer2 size={15} /> Sélection <ChevronDown size={14} /></button>
+            <div className="canvas-select"><MousePointer2 size={15} /> Outil sélection</div>
             <div className="canvas-actions">
               <button className="icon-button small" title="Découper" onClick={splitSelectedClip}><Scissors size={16} /></button>
-              <button className="icon-button small" title="Ajuster le clip" onClick={() => selectedClipId && notify('Réglages du clip ouverts à droite')}><SlidersHorizontal size={16} /></button>
+              <button className="icon-button small" title="Ajuster le clip au cadre" disabled={!selectedTimelineClip || !['video', 'image'].includes(selectedTimelineClip.kind)} onClick={() => updateSelectedClip({ x: 0, y: 0, scale: 1, rotation: 0, cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 })}><SlidersHorizontal size={16} /></button>
               <span className="zoom-label">Ajuster</span>
-              <button className="icon-button small" title="Plein écran"><Maximize2 size={16} /></button>
+              <button className="icon-button small" title="Plein écran" onClick={toggleFullscreen}><Maximize2 size={16} /></button>
             </div>
           </div>
 
-          <div className="stage-area">
+          <div className="stage-area" ref={stageRef}>
             <div className="stage-shadow">
               <div className={`video-canvas preset-${captionStyle.preset}`} style={captionCss}>
                 {activeVisualClips.length ? activeVisualClips.map(({ clip, trackIndex }, index) => (
@@ -736,7 +783,7 @@ export function Editor() {
                 <div className="safe-zone" />
                 <div
                   dir={scriptMode === 'arabic' ? 'rtl' : 'ltr'}
-                  className={`caption-on-canvas ${captionStyle.shadow ? 'with-shadow' : ''} ${captionStyle.uppercase ? 'is-uppercase' : ''}`}
+                  className={`caption-on-canvas animation-${captionStyle.animation ?? 'pop'} ${captionStyle.shadow ? 'with-shadow' : ''} ${captionStyle.uppercase ? 'is-uppercase' : ''}`}
                 >
                   <span>{captionText}</span>
                   <i />
@@ -799,6 +846,9 @@ export function Editor() {
         />
       </div>
 
+      {scriptOpen && <ScriptDialog onClose={() => setScriptOpen(false)} onApply={applyGeneratedScript} />}
+      {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
+
       {exportOpen && (
         <ExportDialog
           projectName={projectName}
@@ -833,6 +883,9 @@ function PanelContent({
   applyTransition,
   applyEffect,
   applyTemplate,
+  openScriptGenerator,
+  voiceClip,
+  updateVoiceClip,
   selectVoiceTrack,
   notify,
 }: {
@@ -853,21 +906,33 @@ function PanelContent({
   applyTransition: (transition: TransitionType) => void;
   applyEffect: (effect: NonNullable<TimelineClip['effect']>) => void;
   applyTemplate: (templateId: string) => void;
+  openScriptGenerator: () => void;
+  voiceClip: TimelineClip | null;
+  updateVoiceClip: (patch: Partial<TimelineClip>) => void;
   selectVoiceTrack: () => void;
   notify: (message: string) => void;
 }) {
+  const [mediaSearch, setMediaSearch] = useState('');
+  const [mediaFilter, setMediaFilter] = useState<'all' | MediaAsset['kind']>('all');
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateCategory, setTemplateCategory] = useState<'all' | 'reels' | 'ads'>('all');
+  const [transitionSearch, setTransitionSearch] = useState('');
+  const filteredAssets = assets.filter((asset) => (mediaFilter === 'all' || asset.kind === mediaFilter) && asset.name.toLowerCase().includes(mediaSearch.toLowerCase()));
+  const filteredTemplates = templates.filter((template, index) => template.name.toLowerCase().includes(templateSearch.toLowerCase()) && (templateCategory === 'all' || (templateCategory === 'reels' ? template.format === '9:16' : index % 2 === 0)));
+  const filteredTransitions = transitions.filter((transition) => transition.name.toLowerCase().includes(transitionSearch.toLowerCase()));
+
   if (activeTab === 'media') {
     return (
       <>
         <PanelHeader title="Médias" />
         <div className="panel-content">
           <button className="upload-button" onClick={() => fileInputRef.current?.click()}><UploadCloud size={17} /> Importer des médias</button>
-          <div className="search-box"><Search size={15} /><input placeholder="Rechercher vos médias" /></div>
-          <div className="panel-tabs"><button className="active">Tout</button><button>Vidéos</button><button>Images</button><button>Audio</button></div>
+          <div className="search-box"><Search size={15} /><input value={mediaSearch} onChange={(event) => setMediaSearch(event.target.value)} placeholder="Rechercher vos médias" /></div>
+          <div className="panel-tabs"><button className={mediaFilter === 'all' ? 'active' : ''} onClick={() => setMediaFilter('all')}>Tout</button><button className={mediaFilter === 'video' ? 'active' : ''} onClick={() => setMediaFilter('video')}>Vidéos</button><button className={mediaFilter === 'image' ? 'active' : ''} onClick={() => setMediaFilter('image')}>Images</button><button className={mediaFilter === 'audio' ? 'active' : ''} onClick={() => setMediaFilter('audio')}>Audio</button></div>
           <p className="media-helper">Double-clique un média pour l’ajouter au curseur.</p>
           <div className="media-grid">
             <button className="media-add" onClick={() => fileInputRef.current?.click()}><ImagePlus size={23} /><span>Ajouter</span></button>
-            {assets.map((asset) => (
+            {filteredAssets.map((asset) => (
               <button
                 key={asset.id}
                 className={`media-card ${activeVideoId === asset.id ? 'selected' : ''}`}
@@ -896,6 +961,7 @@ function PanelContent({
       <>
         <PanelHeader title="Captions IA" badge="8 segments" />
         <div className="panel-content">
+          <button className="generate-script-button" onClick={openScriptGenerator}><Sparkles size={16} /> Générer le script en darija</button>
           <div className="language-switch">
             <button className={scriptMode === 'latin' ? 'active' : ''} onClick={() => setScriptMode('latin')}>Darija latin</button>
             <button className={scriptMode === 'arabic' ? 'active' : ''} onClick={() => setScriptMode('arabic')}>دارجة</button>
@@ -921,10 +987,10 @@ function PanelContent({
       <>
         <PanelHeader title="Modèles" badge="Pro" />
         <div className="panel-content">
-          <div className="search-box"><Search size={15} /><input placeholder="Rechercher un modèle" /></div>
-          <div className="filter-chips"><button className="active">Pour vous</button><button>Reels</button><button>Ads</button></div>
+          <div className="search-box"><Search size={15} /><input value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} placeholder="Rechercher un modèle" /></div>
+          <div className="filter-chips"><button className={templateCategory === 'all' ? 'active' : ''} onClick={() => setTemplateCategory('all')}>Pour vous</button><button className={templateCategory === 'reels' ? 'active' : ''} onClick={() => setTemplateCategory('reels')}>Reels</button><button className={templateCategory === 'ads' ? 'active' : ''} onClick={() => setTemplateCategory('ads')}>Ads</button></div>
           <div className="template-grid">
-            {templates.map((template) => (
+            {filteredTemplates.map((template) => (
               <button key={template.id} className="template-card" onClick={() => applyTemplate(template.id)}>
                 <div style={{ background: `linear-gradient(145deg, ${template.colors[0]}, ${template.colors[1]})` }}>
                   <strong>{template.name.split(' ')[0]}</strong><span>{template.format}</span>
@@ -943,10 +1009,10 @@ function PanelContent({
       <>
         <PanelHeader title="Transitions" />
         <div className="panel-content">
-          <div className="search-box"><Search size={15} /><input placeholder="Rechercher" /></div>
+          <div className="search-box"><Search size={15} /><input value={transitionSearch} onChange={(event) => setTransitionSearch(event.target.value)} placeholder="Rechercher une transition" /></div>
           <p className="helper-copy">Clique sur une transition pour l’ajouter entre les deux clips sélectionnés.</p>
           <div className="transition-grid">
-            {transitions.map((transition) => {
+            {filteredTransitions.map((transition) => {
               const transitionType = ({ tr1: 'fade', tr2: 'slide', tr3: 'zoom', tr4: 'flash', tr5: 'rotate', tr6: 'wipe' } as const)[transition.id as keyof { tr1: 'fade'; tr2: 'slide'; tr3: 'zoom'; tr4: 'flash'; tr5: 'rotate'; tr6: 'wipe' }];
               return (
                 <button
@@ -993,9 +1059,9 @@ function PanelContent({
             <i><Mic2 size={22} /></i><span><strong>Voix off Darija</strong><small>00:32 · timestamps inclus</small></span><Play size={16} fill="currentColor" />
           </button>
           <label className="section-mini-title">RÉGLAGES</label>
-          <div className="audio-setting"><span>Volume voix</span><strong>100%</strong></div>
-          <div className="audio-setting"><span>Réduction du bruit</span><button className="switch-on"><i /></button></div>
-          <div className="audio-setting"><span>Duck musique</span><strong>-14 dB</strong></div>
+          <div className="audio-setting audio-range-setting"><span>Volume voix</span><input aria-label="Volume de la voix" type="range" min="0" max="2" step=".01" value={voiceClip?.volume ?? 1} onChange={(event) => updateVoiceClip({ volume: Number(event.target.value) })} /><strong>{Math.round((voiceClip?.volume ?? 1) * 100)}%</strong></div>
+          <div className="audio-setting"><span>Réduction du bruit</span><button className={voiceClip?.noiseReduction ? 'switch-on' : 'switch-off'} onClick={() => updateVoiceClip({ noiseReduction: !voiceClip?.noiseReduction })} aria-pressed={Boolean(voiceClip?.noiseReduction)}><i /></button></div>
+          <div className="audio-setting"><span>Découpage source</span><strong>{(voiceClip?.sourceStart ?? 0).toFixed(1)}s → {((voiceClip?.sourceStart ?? 0) + (voiceClip?.duration ?? 0)).toFixed(1)}s</strong></div>
           <button className="upload-secondary" onClick={() => fileInputRef.current?.click()}><FolderUp size={16} /> Ajouter une piste audio</button>
         </div>
       </>
@@ -1022,7 +1088,6 @@ function PanelHeader({ title, badge }: { title: string; badge?: string }) {
   return (
     <div className="panel-head">
       <div><h2>{title}</h2>{badge && <span>{badge}</span>}</div>
-      <button className="icon-button small"><MoreHorizontal size={18} /></button>
     </div>
   );
 }
@@ -1182,7 +1247,6 @@ function InspectorPanel({
       <aside className="inspector-panel">
         <div className="inspector-head">
           <div><SlidersHorizontal size={17} /><span><strong>Réglages du clip</strong><small>{clip.name}</small></span></div>
-          <button className="icon-button small"><MoreHorizontal size={18} /></button>
         </div>
         <div className="inspector-scroll">
           <section className="control-section clip-source-section">
@@ -1266,7 +1330,6 @@ function InspectorPanel({
     <aside className="inspector-panel">
       <div className="inspector-head">
         <div><Type size={17} /><strong>Style des captions</strong></div>
-        <button className="icon-button small"><MoreHorizontal size={18} /></button>
       </div>
       <div className="inspector-scroll">
         <section className="control-section">
@@ -1276,13 +1339,13 @@ function InspectorPanel({
           </div>
         </section>
         <section className="control-section">
-          <div className="section-row"><label className="section-label">TYPOGRAPHIE</label><button>Réinitialiser</button></div>
-          <button className="select-field"><strong>Montserrat ExtraBold</strong><ChevronDown size={15} /></button>
+          <div className="section-row"><label className="section-label">TYPOGRAPHIE</label><button onClick={() => commitStyle(INITIAL_STYLE)}>Réinitialiser</button></div>
+          <select className="select-field" value={captionStyle.fontFamily ?? 'impact'} onChange={(event) => commitStyle({ fontFamily: event.target.value as CaptionStyle['fontFamily'] })}><option value="impact">Impact ExtraBold</option><option value="sans">Sans moderne</option><option value="rounded">Rounded Bold</option></select>
           <div className="triple-controls"><div><span>Taille</span><input type="number" value={captionStyle.fontSize} onChange={(e) => commitStyle({ fontSize: Number(e.target.value) })} /></div><button className={captionStyle.uppercase ? 'toggle-button active' : 'toggle-button'} onClick={() => commitStyle({ uppercase: !captionStyle.uppercase })}>AA</button><button className={captionStyle.shadow ? 'toggle-button active' : 'toggle-button'} onClick={() => commitStyle({ shadow: !captionStyle.shadow })}>S</button></div>
         </section>
         <section className="control-section"><label className="section-label">COULEURS</label><ColorControl label="Texte" value={captionStyle.textColor} onChange={(value) => commitStyle({ textColor: value })} /><ColorControl label="Accent" value={captionStyle.accentColor} onChange={(value) => commitStyle({ accentColor: value })} /><ColorControl label="Fond" value={captionStyle.backgroundColor} onChange={(value) => commitStyle({ backgroundColor: value })} /></section>
         <section className="control-section"><div className="section-row"><label className="section-label">POSITION</label><span>{captionStyle.position}%</span></div><div className="position-control"><div className="phone-position"><i style={{ top: `${captionStyle.position}%` }} /></div><input type="range" min="15" max="88" value={captionStyle.position} onChange={(e) => commitStyle({ position: Number(e.target.value) })} /></div></section>
-        <section className="control-section compact"><button className="expand-row"><WandSparkles size={17} /><span>Animation d’entrée</span><strong>Pop</strong><ChevronDown size={15} /></button><button className="expand-row"><Languages size={17} /><span>Langue</span><strong>Darija DZ</strong><ChevronDown size={15} /></button></section>
+        <section className="control-section"><label className="section-label">ANIMATION D’ENTRÉE</label><select className="select-field" value={captionStyle.animation ?? 'pop'} onChange={(event) => commitStyle({ animation: event.target.value as CaptionStyle['animation'] })}><option value="pop">Pop</option><option value="fade">Fondu</option><option value="none">Aucune</option></select></section>
       </div>
     </aside>
   );
@@ -1474,7 +1537,7 @@ function Timeline({
     <section className="timeline-panel timeline-v2">
       <div className="timeline-toolbar">
         <div className="timeline-tools-left">
-          <button className="icon-button small active-tool" title="Outil de sélection"><MousePointer2 size={16} /></button>
+          <span className="icon-button small active-tool" title="Outil de sélection"><MousePointer2 size={16} /></span>
           <button className="icon-button small" onClick={splitSelectedClip} disabled={!selectedClip} title="Découper au curseur (S)"><Scissors size={16} /></button>
           <button className="icon-button small" onClick={duplicateSelectedClip} disabled={!selectedClip} title="Dupliquer (Ctrl+D)"><Copy size={15} /></button>
           <button className="icon-button small danger-tool" onClick={removeSelectedClip} disabled={!selectedClip} title="Supprimer"><Trash2 size={15} /></button>
@@ -1615,6 +1678,57 @@ function TimelineClipView({
   );
 }
 
+function ScriptDialog({ onClose, onApply }: { onClose: () => void; onApply: (captions: Caption[]) => void }) {
+  const [topic, setTopic] = useState('Créer des vidéos professionnelles en darija');
+  const [tone, setTone] = useState<'energetic' | 'educational' | 'sales' | 'story'>('energetic');
+  const [duration, setDuration] = useState(30);
+  const [alphabet, setAlphabet] = useState<'latin' | 'arabic'>('latin');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ script: string; scriptAr: string; captions: Caption[]; engine: string } | null>(null);
+
+  const generate = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic, tone, duration }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Génération impossible');
+      setResult(data);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Génération impossible');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="script-dialog" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="export-head"><div><span><Sparkles size={19} /></span><div><h2>Générer un script en darija</h2><p>Moteur local self-hosted · aucune donnée externe</p></div></div><button className="icon-button" onClick={onClose}><X size={18} /></button></div>
+        <div className="script-body">
+          <div className="script-form">
+            <label>Sujet de la vidéo<textarea value={topic} onChange={(event) => setTopic(event.target.value)} maxLength={120} placeholder="Exemple : présenter mon produit…" /></label>
+            <div className="export-row"><label>Ton<select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)}><option value="energetic">Énergique</option><option value="educational">Éducatif</option><option value="sales">Commercial</option><option value="story">Storytelling</option></select></label><label>Durée<select value={duration} onChange={(event) => setDuration(Number(event.target.value))}><option value="15">15 secondes</option><option value="30">30 secondes</option></select></label></div>
+            <div className="language-switch"><button className={alphabet === 'latin' ? 'active' : ''} onClick={() => setAlphabet('latin')}>Darija latin</button><button className={alphabet === 'arabic' ? 'active' : ''} onClick={() => setAlphabet('arabic')}>دارجة عربية</button></div>
+            <button className="generate-main-button" onClick={generate} disabled={loading || topic.trim().length < 3}>{loading ? <><RotateCcw className="spin" size={16} /> Génération…</> : <><Sparkles size={16} /> Générer le script</>}</button>
+            {error && <div className="script-error">{error}</div>}
+          </div>
+          <div className="script-result" dir={alphabet === 'arabic' ? 'rtl' : 'ltr'}>
+            {result ? <><div className="script-result-head"><span>{result.captions.length} segments</span><small>{result.engine}</small></div><p>{alphabet === 'arabic' ? result.scriptAr : result.script}</p></> : <div className="script-empty"><Sparkles size={24} /><strong>Ton script apparaîtra ici</strong><span>Il sera automatiquement transformé en captions avec timestamps.</span></div>}
+          </div>
+        </div>
+        <div className="export-footer"><button className="manifest-button" onClick={onClose}>Annuler</button><button className="render-button" disabled={!result} onClick={() => result && onApply(result.captions)}><Check size={16} /> Utiliser ce script</button></div>
+      </div>
+    </div>
+  );
+}
+
+function HelpDialog({ onClose }: { onClose: () => void }) {
+  const shortcuts = [['Espace', 'Lecture / pause'], ['S', 'Découper au curseur'], ['Suppr', 'Supprimer le clip'], ['Ctrl + D', 'Dupliquer'], ['Ctrl + Z', 'Annuler'], ['Double-clic média', 'Ajouter à la timeline']];
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="help-dialog" onMouseDown={(event) => event.stopPropagation()}><div className="export-head"><div><span><CircleHelp size={19} /></span><div><h2>Aide Darja Studio</h2><p>Commandes principales de l’éditeur</p></div></div><button className="icon-button" onClick={onClose}><X size={18} /></button></div><div className="help-body"><h3>Raccourcis</h3>{shortcuts.map(([key, action]) => <div className="shortcut-row" key={key}><kbd>{key}</kbd><span>{action}</span></div>)}<div className="help-note"><strong>Workflow conseillé</strong><span>Importe les médias, double-clique pour les ajouter, ajuste la timeline, génère les captions puis exporte le MP4.</span></div></div><div className="export-footer"><button className="render-button" onClick={onClose}><Check size={16} /> Compris</button></div></div></div>;
+}
+
 function ExportDialog({
   projectName,
   renderStatus,
@@ -1627,9 +1741,13 @@ function ExportDialog({
   renderStatus: 'idle' | 'sending' | 'ready' | 'error';
   renderJob: string | null;
   onClose: () => void;
-  onRender: () => void;
+  onRender: (settings: { format: string; fps: number; quality: 'standard' | 'high' | 'maximum'; fileName: string }) => void;
   onDownloadProject: () => void;
 }) {
+  const [fileName, setFileName] = useState(`${projectName.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'darja-video'}.mp4`);
+  const [format, setFormat] = useState('1080x1920');
+  const [fps, setFps] = useState(30);
+  const [quality, setQuality] = useState<'standard' | 'high' | 'maximum'>('high');
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="export-dialog" onMouseDown={(event) => event.stopPropagation()}>
@@ -1640,14 +1758,14 @@ function ExportDialog({
         <div className="export-body">
           <div className="export-preview"><DemoVisual /><span>9:16</span></div>
           <div className="export-settings">
-            <label>Nom du fichier<input defaultValue="demo-produit-darija.mp4" /></label>
+            <label>Nom du fichier<input value={fileName} onChange={(event) => setFileName(event.target.value)} /></label>
             <div className="export-row">
-              <label>Résolution<button>1080 × 1920 <ChevronDown size={14} /></button></label>
-              <label>Images/sec<button>30 FPS <ChevronDown size={14} /></button></label>
+              <label>Résolution<select value={format} onChange={(event) => setFormat(event.target.value)}><option value="540x960">540 × 960</option><option value="720x1280">720 × 1280</option><option value="1080x1920">1080 × 1920</option></select></label>
+              <label>Images/sec<select value={fps} onChange={(event) => setFps(Number(event.target.value))}><option value="24">24 FPS</option><option value="30">30 FPS</option><option value="60">60 FPS</option></select></label>
             </div>
             <div className="export-row">
-              <label>Format<button>MP4 · H.264 <ChevronDown size={14} /></button></label>
-              <label>Qualité<button>Élevée <ChevronDown size={14} /></button></label>
+              <label>Format<div className="export-static-field">MP4 · H.264</div></label>
+              <label>Qualité<select value={quality} onChange={(event) => setQuality(event.target.value as 'standard' | 'high' | 'maximum')}><option value="standard">Standard</option><option value="high">Élevée</option><option value="maximum">Maximum</option></select></label>
             </div>
             <div className="export-summary"><div><Sparkles size={17} /><span><strong>Moteur FFmpeg self-hosted prêt</strong><small>32 s · MP4 H.264 · audio AAC · captions intégrées</small></span></div><Check size={17} /></div>
             {renderStatus === 'ready' && (
@@ -1658,7 +1776,7 @@ function ExportDialog({
         </div>
         <div className="export-footer">
           <button className="manifest-button" onClick={onDownloadProject}>Télécharger le projet JSON</button>
-          <button className="render-button" onClick={onRender} disabled={renderStatus === 'sending'}>
+          <button className="render-button" onClick={() => onRender({ format, fps, quality, fileName })} disabled={renderStatus === 'sending' || !fileName.trim()}>
             {renderStatus === 'sending' ? <><RotateCcw className="spin" size={17} /> Rendu MP4 en cours…</> : <><Download size={17} /> Exporter le MP4</>}
           </button>
         </div>

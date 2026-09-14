@@ -29,6 +29,8 @@ export type CaptionStyle = {
   position: number;
   uppercase: boolean;
   shadow: boolean;
+  fontFamily?: 'impact' | 'sans' | 'rounded';
+  animation?: 'pop' | 'fade' | 'none';
 };
 
 export type MediaAsset = {
@@ -69,6 +71,7 @@ export type TimelineClip = {
   rotation?: number;
   opacity?: number;
   volume?: number;
+  noiseReduction?: boolean;
   cropTop?: number;
   cropRight?: number;
   cropBottom?: number;

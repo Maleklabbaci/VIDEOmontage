@@ -19,7 +19,12 @@ npm run dev
 - trim non destructif avec `sourceStart`, split, duplication et suppression ;
 - snapping magnétique, zoom, verrouillage et ajout de pistes ;
 - raccourcis : espace, S, Suppr, Ctrl/Cmd+D et Ctrl/Cmd+Z ;
+- générateur local de scripts darija par sujet, ton et durée ;
+- sortie séparée en alphabet latin ou arabe, sans mélange d’alphabets ;
+- insertion automatique du script en captions horodatées sur la timeline ;
 - captions darija latin/arabe synchronisées par timestamps ;
+- recherches et filtres Médias, Modèles et Transitions fonctionnels ;
+- aide, plein écran, menu projet et options d’export fonctionnels ;
 - textes libres ajoutés à une vraie piste ;
 - transitions preview : fade, slide, zoom, flash, rotation et wipe ;
 - transformation des clips : X, Y, échelle, rotation, opacité et crop ;
@@ -35,7 +40,8 @@ npm run dev
 
 - `POST /api/assets` : stockage d’un média ;
 - `GET /api/assets/:filename` : lecture avec support Range ;
-- `POST /api/render` : composition et téléchargement du MP4.
+- `POST /api/render` : composition et téléchargement du MP4 ;
+- `POST /api/script` : génération locale du script darija et de ses timestamps.
 
 ## À renforcer avant production
 

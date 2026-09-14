@@ -10,13 +10,13 @@ type Keyframe = { time: number; property: string; value: number };
 type ClipInput = {
   id: string; trackId: string; assetId?: string; kind: 'video' | 'image' | 'audio' | 'caption' | 'text'; name: string; text?: string;
   start: number; duration: number; sourceStart: number; color?: string; x?: number; y?: number; scale?: number; rotation?: number;
-  opacity?: number; volume?: number; cropTop?: number; cropRight?: number; cropBottom?: number; cropLeft?: number;
+  opacity?: number; volume?: number; noiseReduction?: boolean; cropTop?: number; cropRight?: number; cropBottom?: number; cropLeft?: number;
   transitionIn?: string; transitionDuration?: number; effect?: 'none' | 'enhance' | 'grain' | 'glow' | 'motionBlur'; keyframes?: Keyframe[];
 };
 type TrackInput = { id: string; kind: string; muted?: boolean; clips: ClipInput[] };
 type CaptionInput = { start: number; end: number; text: string };
 type CaptionStyleInput = { preset?: string; fontSize?: number; textColor?: string; accentColor?: string; position?: number; uppercase?: boolean };
-export type RenderPayload = { duration?: number; fps?: number; format?: string; projectName?: string; tracks?: TrackInput[]; assets?: AssetInput[]; captions?: CaptionInput[]; captionStyle?: CaptionStyleInput };
+export type RenderPayload = { duration?: number; fps?: number; format?: string; quality?: 'standard' | 'high' | 'maximum'; projectName?: string; tracks?: TrackInput[]; assets?: AssetInput[]; captions?: CaptionInput[]; captionStyle?: CaptionStyleInput };
 
 const number = (value: unknown, fallback: number, min = -Infinity, max = Infinity) => {
   const parsed = Number(value);
@@ -92,6 +92,7 @@ function runFfmpeg(args: string[]) {
 export async function renderVideo(payload: RenderPayload) {
   const duration = number(payload.duration, 32, .5, 180);
   const fps = Math.round(number(payload.fps, 30, 12, 60));
+  const crf = payload.quality === 'maximum' ? '18' : payload.quality === 'standard' ? '28' : '23';
   const formatMatch = /^(\d{3,4})x(\d{3,4})$/.exec(payload.format ?? '1080x1920');
   const width = Math.round(number(formatMatch?.[1], 1080, 360, 1920) / 2) * 2;
   const height = Math.round(number(formatMatch?.[2], 1920, 360, 1920) / 2) * 2;
@@ -180,7 +181,10 @@ export async function renderVideo(payload: RenderPayload) {
     const sourceStart = number(clip.sourceStart, 0, 0, 86400);
     const delay = Math.round(start * 1000);
     const label = `audio${index}`;
-    filters.push(`[${input}:a]atrim=start=${ff(sourceStart)}:duration=${ff(clipDuration)},asetpts=PTS-STARTPTS,adelay=${delay}:all=1,volume=${ff(number(clip.volume, 1, 0, 2))}[${label}]`);
+    let audioChain = `[${input}:a]atrim=start=${ff(sourceStart)}:duration=${ff(clipDuration)},asetpts=PTS-STARTPTS`;
+    if (clip.noiseReduction) audioChain += ',highpass=f=80,lowpass=f=12000,afftdn=nf=-25';
+    audioChain += `,adelay=${delay}:all=1,volume=${ff(number(clip.volume, 1, 0, 2))}[${label}]`;
+    filters.push(audioChain);
     audioLabels.push(label);
   });
   if (audioLabels.length) {
@@ -190,7 +194,7 @@ export async function renderVideo(payload: RenderPayload) {
     filters.push(`[1:a]atrim=duration=${ff(duration)}[aout]`);
   }
 
-  args.push('-filter_complex', filters.join(';'), '-map', '[vout]', '-map', '[aout]', '-t', ff(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', outputPath);
+  args.push('-filter_complex', filters.join(';'), '-map', '[vout]', '-map', '[aout]', '-t', ff(duration), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', crf, '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', outputPath);
 
   try {
     await runFfmpeg(args);
