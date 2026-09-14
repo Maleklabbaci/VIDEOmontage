@@ -11,7 +11,12 @@ npm run dev
 
 ## Fonctionnalités actives
 
-- mode automatique par étapes : script → voix → médias → style → génération ;
+- workflow voice-first : voix off → script → synchronisation mot par mot → vidéos → styles → montage ;
+- import optionnel des timestamps exacts `{ word, start, end }` fournis par l’API voix ;
+- alignement local estimé lorsque les timestamps exacts ne sont pas disponibles ;
+- captions karaoke mot par mot dans la preview et l’export FFmpeg/ASS ;
+- planificateur sémantique qui associe chaque scène aux noms/descriptions des médias ;
+- 24 styles complets : 8 Darija, 8 arabes et 8 français ;
 - interface responsive dédiée aux ordinateurs, tablettes et mobiles ;
 - génération d’un projet/timeline complète en un clic ;
 - export MP4 direct ou ouverture dans l’éditeur avancé ;
@@ -49,7 +54,9 @@ npm run dev
 - `POST /api/assets` : stockage d’un média ;
 - `GET /api/assets/:filename` : lecture avec support Range ;
 - `POST /api/render` : composition et téléchargement du MP4 ;
-- `POST /api/script` : génération locale du script darija et de ses timestamps.
+- `POST /api/script` : génération locale du script darija ;
+- `POST /api/align` : alignement mot par mot exact ou estimé ;
+- `POST /api/plan` : sélection sémantique des plans pour chaque scène.
 
 ## À renforcer avant production
 

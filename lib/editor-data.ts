@@ -12,12 +12,20 @@ import {
 
 export type TabId = 'media' | 'templates' | 'text' | 'captions' | 'audio' | 'transitions' | 'effects';
 
+export type WordTiming = {
+  word: string;
+  start: number;
+  end: number;
+  confidence?: number;
+};
+
 export type Caption = {
   id: string;
   start: number;
   end: number;
   text: string;
   textAr?: string;
+  words?: WordTiming[];
 };
 
 export type CaptionStyle = {
@@ -41,6 +49,7 @@ export type MediaAsset = {
   storageId?: string;
   color: string;
   duration?: number;
+  description?: string;
 };
 
 export type TimelineClipKind = 'video' | 'image' | 'audio' | 'caption' | 'text';

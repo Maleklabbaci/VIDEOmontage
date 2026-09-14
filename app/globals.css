@@ -190,6 +190,9 @@ button:disabled { opacity: .38; cursor: not-allowed; }
 .caption-on-canvas.animation-none { opacity: 1; }
 .caption-on-canvas.with-shadow { filter: drop-shadow(0 3px 1px rgba(0,0,0,.88)) drop-shadow(0 0 5px rgba(0,0,0,.55)); }
 .caption-on-canvas span { position: relative; z-index: 2; }
+.caption-on-canvas b { font: inherit; color: inherit; transition: color .08s ease, transform .08s ease; }
+.caption-on-canvas b.spoken-word { color: var(--caption-color); opacity: .82; }
+.caption-on-canvas b.active-word { display: inline-block; color: var(--caption-accent); transform: scale(1.08); }
 .caption-on-canvas i { width: 44%; height: 7px; position: absolute; z-index: 1; left: 28%; bottom: -6px; border-radius: 1px; background: var(--caption-accent); transform: skew(-18deg); }
 .preset-minimal .caption-on-canvas { font-family: Inter, sans-serif; font-weight: 800; line-height: 1.08; }
 .preset-minimal .caption-on-canvas i { display: none; }

@@ -14,7 +14,7 @@ type ClipInput = {
   transitionIn?: string; transitionDuration?: number; effect?: 'none' | 'enhance' | 'grain' | 'glow' | 'motionBlur'; keyframes?: Keyframe[];
 };
 type TrackInput = { id: string; kind: string; muted?: boolean; clips: ClipInput[] };
-type CaptionInput = { start: number; end: number; text: string };
+type CaptionInput = { start: number; end: number; text: string; words?: Array<{ word: string; start: number; end: number }> };
 type CaptionStyleInput = { preset?: string; fontSize?: number; textColor?: string; accentColor?: string; position?: number; uppercase?: boolean };
 export type RenderPayload = { duration?: number; fps?: number; format?: string; quality?: 'standard' | 'high' | 'maximum'; projectName?: string; tracks?: TrackInput[]; assets?: AssetInput[]; captions?: CaptionInput[]; captionStyle?: CaptionStyleInput };
 
@@ -66,7 +66,12 @@ function makeAss(captions: CaptionInput[], style: CaptionStyleInput, duration: n
     .filter((caption) => caption.end > 0 && caption.start < duration)
     .map((caption) => {
       const raw = style.uppercase ? caption.text.toUpperCase() : caption.text;
-      const text = style.preset === 'impact' ? `{\\c${primary}\\bord${outline}}${assEscape(raw)}` : assEscape(raw);
+      const karaoke = caption.words?.length ? caption.words.map((timing) => {
+        const word = style.uppercase ? timing.word.toUpperCase() : timing.word;
+        const centiseconds = Math.max(1, Math.round((timing.end - timing.start) * 100));
+        return `{\\kf${centiseconds}}${assEscape(word)}`;
+      }).join(' ') : assEscape(raw);
+      const text = style.preset === 'impact' ? `{\\c${primary}\\bord${outline}}${karaoke}` : karaoke;
       return `Dialogue: 0,${assTime(caption.start)},${assTime(Math.min(duration, caption.end))},Darja,,0,0,0,,${text}`;
     }).join('\n');
   return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Darja,DejaVu Sans,${fontSize},${primary},${accent},&H00101012,&H90000000,-1,0,0,0,100,100,0,0,${borderStyle},${outline},2,2,28,28,${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${body}\n`;

@@ -67,6 +67,7 @@ import {
   TimelineTrack,
   TransitionType,
   transitions,
+  WordTiming,
 } from '@/lib/editor-data';
 
 const INITIAL_STYLE: CaptionStyle = {
@@ -229,6 +230,7 @@ function AdvancedEditor({ onBackToEasy }: { onBackToEasy: () => void }) {
       end: clip.start + clip.duration,
       text: clip.text ?? clip.name,
       textAr: source?.textAr,
+      words: source?.words,
     };
   }, [captions, currentTime, tracks]);
 
@@ -720,6 +722,7 @@ function AdvancedEditor({ onBackToEasy }: { onBackToEasy: () => void }) {
   };
 
   const captionText = scriptMode === 'arabic' ? currentCaption.textAr || currentCaption.text : currentCaption.text;
+  const activeWordIndex = currentCaption.words?.findIndex((word) => currentTime >= word.start && currentTime < word.end) ?? -1;
   const captionProgress = Math.min(1, Math.max(0, (currentTime - currentCaption.start) / .24));
   const captionFont = captionStyle.fontFamily === 'sans' ? 'Inter, sans-serif' : captionStyle.fontFamily === 'rounded' ? 'Arial Rounded MT Bold, Inter, sans-serif' : 'Impact, Arial Black, sans-serif';
   const captionCss: CSSProperties = {
@@ -866,7 +869,7 @@ function AdvancedEditor({ onBackToEasy }: { onBackToEasy: () => void }) {
                   dir={scriptMode === 'arabic' ? 'rtl' : 'ltr'}
                   className={`caption-on-canvas animation-${captionStyle.animation ?? 'pop'} ${captionStyle.shadow ? 'with-shadow' : ''} ${captionStyle.uppercase ? 'is-uppercase' : ''}`}
                 >
-                  <span>{captionText}</span>
+                  <span>{currentCaption.words?.length ? currentCaption.words.map((word, index) => <b key={`${word.start}-${index}`} className={index === activeWordIndex ? 'active-word' : index < activeWordIndex ? 'spoken-word' : ''}>{word.word} </b>) : captionText}</span>
                   <i />
                 </div>}
                 <div className="canvas-tag"><Sparkles size={11} /> Auto captions</div>
@@ -964,26 +967,75 @@ type AutoProject = {
   assets: MediaAsset[];
 };
 
+type AutoStyleDefinition = {
+  id: string;
+  group: 'darija' | 'arabic' | 'french';
+  name: string;
+  subtitle: string;
+  sample: string;
+  captionStyle: Partial<CaptionStyle>;
+  effect: NonNullable<TimelineClip['effect']>;
+  transitions: TransitionType[];
+  previewBackground: string;
+  previewColor: string;
+};
+
+const AUTO_STYLES: AutoStyleDefinition[] = [
+  { id: 'dz-impact', group: 'darija', name: 'Impact DZ', subtitle: 'Bold · cuts rapides', sample: 'SAH!', captionStyle: { preset: 'impact', fontFamily: 'impact', fontSize: 56, textColor: '#ffffff', accentColor: '#ff6b35', animation: 'pop' }, effect: 'enhance', transitions: ['zoom', 'slide', 'flash'], previewBackground: 'linear-gradient(145deg,#f06b3e,#2c1b21)', previewColor: '#ffffff' },
+  { id: 'dz-street', group: 'darija', name: 'Street Alger', subtitle: 'Urbain · énergique', sample: 'VRAI', captionStyle: { preset: 'box', fontFamily: 'impact', fontSize: 53, textColor: '#111217', accentColor: '#a9ff45', backgroundColor: '#a9ff45', animation: 'pop' }, effect: 'grain', transitions: ['flash', 'slide'], previewBackground: 'linear-gradient(145deg,#1d1f22,#3d4442)', previewColor: '#a9ff45' },
+  { id: 'dz-pop', group: 'darija', name: 'Darija Pop', subtitle: 'Coloré · réseaux', sample: 'WOW', captionStyle: { preset: 'neon', fontFamily: 'rounded', fontSize: 52, textColor: '#fff34e', accentColor: '#ff4f91', backgroundColor: '#3a1230', animation: 'pop' }, effect: 'glow', transitions: ['zoom', 'rotate'], previewBackground: 'radial-gradient(circle,#ff4f91,#49205f 68%)', previewColor: '#fff34e' },
+  { id: 'dz-podcast', group: 'darija', name: 'Podcast DZ', subtitle: 'Lisible · conversation', sample: 'POD', captionStyle: { preset: 'minimal', fontFamily: 'sans', fontSize: 45, textColor: '#ffffff', accentColor: '#5bd6b4', animation: 'fade' }, effect: 'enhance', transitions: ['fade', 'slide'], previewBackground: 'linear-gradient(145deg,#16483c,#101917)', previewColor: '#ffffff' },
+  { id: 'dz-cinema', group: 'darija', name: 'Cinéma DZ', subtitle: 'Dramatique · lent', sample: 'FILM', captionStyle: { preset: 'minimal', fontFamily: 'sans', fontSize: 42, textColor: '#f4dfbd', accentColor: '#c99748', animation: 'fade', uppercase: false }, effect: 'grain', transitions: ['fade', 'zoom'], previewBackground: 'linear-gradient(145deg,#5b3b20,#12110f 72%)', previewColor: '#f4dfbd' },
+  { id: 'dz-sale', group: 'darija', name: 'Promo Darija', subtitle: 'Vente · CTA', sample: '-50%', captionStyle: { preset: 'box', fontFamily: 'impact', fontSize: 57, textColor: '#ffffff', accentColor: '#f23535', backgroundColor: '#f23535', animation: 'pop' }, effect: 'enhance', transitions: ['flash', 'zoom'], previewBackground: 'linear-gradient(145deg,#f23535,#771919)', previewColor: '#ffffff' },
+  { id: 'dz-neon', group: 'darija', name: 'Neon Casbah', subtitle: 'Glow · nuit', sample: 'NIGHT', captionStyle: { preset: 'neon', fontFamily: 'rounded', fontSize: 51, textColor: '#3dffdc', accentColor: '#9a68ff', backgroundColor: '#19102d', animation: 'pop' }, effect: 'glow', transitions: ['rotate', 'zoom'], previewBackground: 'radial-gradient(circle,#6637a8,#100b1c 70%)', previewColor: '#3dffdc' },
+  { id: 'dz-clean', group: 'darija', name: 'Darija Clean', subtitle: 'Simple · moderne', sample: 'BESSAH', captionStyle: { preset: 'minimal', fontFamily: 'sans', fontSize: 44, textColor: '#ffffff', accentColor: '#ffffff', animation: 'fade', uppercase: false }, effect: 'none', transitions: ['fade', 'slide'], previewBackground: 'linear-gradient(145deg,#4c5966,#171a1e)', previewColor: '#ffffff' },
+
+  { id: 'ar-bold', group: 'arabic', name: 'عربي قوي', subtitle: 'واضح · متحرك', sample: 'قوي', captionStyle: { preset: 'box', fontFamily: 'rounded', fontSize: 59, textColor: '#15120b', accentColor: '#f6c64d', backgroundColor: '#f6c64d', uppercase: false, animation: 'pop' }, effect: 'enhance', transitions: ['zoom', 'flash'], previewBackground: 'linear-gradient(145deg,#ffd968,#9d6c17)', previewColor: '#15120b' },
+  { id: 'ar-clean', group: 'arabic', name: 'عربي بسيط', subtitle: 'نظيف · أنيق', sample: 'بسيط', captionStyle: { preset: 'minimal', fontFamily: 'sans', fontSize: 49, textColor: '#ffffff', accentColor: '#48d6aa', uppercase: false, animation: 'fade' }, effect: 'enhance', transitions: ['fade', 'slide'], previewBackground: 'linear-gradient(145deg,#1b594b,#101917)', previewColor: '#ffffff' },
+  { id: 'ar-gold', group: 'arabic', name: 'ذهب عربي', subtitle: 'فاخر · ذهبي', sample: 'ذهب', captionStyle: { preset: 'minimal', fontFamily: 'rounded', fontSize: 52, textColor: '#ffe7a5', accentColor: '#d7a72f', uppercase: false, animation: 'fade' }, effect: 'glow', transitions: ['fade', 'zoom'], previewBackground: 'linear-gradient(145deg,#6d501b,#17130b)', previewColor: '#ffe7a5' },
+  { id: 'ar-news', group: 'arabic', name: 'أخبار', subtitle: 'رسمي · مباشر', sample: 'خبر', captionStyle: { preset: 'box', fontFamily: 'sans', fontSize: 48, textColor: '#ffffff', accentColor: '#c42431', backgroundColor: '#c42431', uppercase: false, animation: 'fade' }, effect: 'enhance', transitions: ['slide', 'fade'], previewBackground: 'linear-gradient(145deg,#1d4273,#0e1827)', previewColor: '#ffffff' },
+  { id: 'ar-modern', group: 'arabic', name: 'عربي مودرن', subtitle: 'حديث · اجتماعي', sample: 'جديد', captionStyle: { preset: 'neon', fontFamily: 'rounded', fontSize: 50, textColor: '#ffffff', accentColor: '#5d8cff', uppercase: false, animation: 'pop' }, effect: 'glow', transitions: ['zoom', 'slide'], previewBackground: 'linear-gradient(145deg,#5d8cff,#482b84)', previewColor: '#ffffff' },
+  { id: 'ar-story', group: 'arabic', name: 'حكاية', subtitle: 'قصة · هادئ', sample: 'حكاية', captionStyle: { preset: 'minimal', fontFamily: 'rounded', fontSize: 47, textColor: '#fff4df', accentColor: '#cb8d67', uppercase: false, animation: 'fade' }, effect: 'grain', transitions: ['fade', 'zoom'], previewBackground: 'linear-gradient(145deg,#744835,#211815)', previewColor: '#fff4df' },
+  { id: 'ar-luxury', group: 'arabic', name: 'فخامة', subtitle: 'أسود · راقي', sample: 'راقي', captionStyle: { preset: 'box', fontFamily: 'rounded', fontSize: 50, textColor: '#111111', accentColor: '#efe5cf', backgroundColor: '#efe5cf', uppercase: false, animation: 'fade' }, effect: 'glow', transitions: ['fade', 'rotate'], previewBackground: 'linear-gradient(145deg,#38332a,#0b0b0b)', previewColor: '#efe5cf' },
+  { id: 'ar-social', group: 'arabic', name: 'ترند عربي', subtitle: 'سريع · ترند', sample: 'ترند', captionStyle: { preset: 'impact', fontFamily: 'rounded', fontSize: 55, textColor: '#ffffff', accentColor: '#ff5a9d', uppercase: false, animation: 'pop' }, effect: 'enhance', transitions: ['flash', 'zoom', 'slide'], previewBackground: 'linear-gradient(145deg,#ff5a9d,#63266f)', previewColor: '#ffffff' },
+
+  { id: 'fr-minimal', group: 'french', name: 'Minimal FR', subtitle: 'Propre · moderne', sample: 'Simple.', captionStyle: { preset: 'minimal', fontFamily: 'sans', fontSize: 43, textColor: '#ffffff', accentColor: '#ffffff', uppercase: false, animation: 'fade' }, effect: 'enhance', transitions: ['fade', 'slide'], previewBackground: 'linear-gradient(145deg,#dcdcd8,#6a6e72)', previewColor: '#17181b' },
+  { id: 'fr-editorial', group: 'french', name: 'Éditorial', subtitle: 'Premium · élégant', sample: 'ÉDITO', captionStyle: { preset: 'box', fontFamily: 'sans', fontSize: 46, textColor: '#141519', accentColor: '#f0eee8', backgroundColor: '#f0eee8', uppercase: false, animation: 'pop' }, effect: 'grain', transitions: ['fade', 'zoom'], previewBackground: 'linear-gradient(145deg,#5b5248,#171513)', previewColor: '#f0eee8' },
+  { id: 'fr-bold', group: 'french', name: 'French Bold', subtitle: 'Puissant · publicité', sample: 'GRAND', captionStyle: { preset: 'impact', fontFamily: 'impact', fontSize: 56, textColor: '#ffffff', accentColor: '#ff3c35', animation: 'pop' }, effect: 'enhance', transitions: ['flash', 'slide'], previewBackground: 'linear-gradient(145deg,#ff3c35,#4a1520)', previewColor: '#ffffff' },
+  { id: 'fr-cinema', group: 'french', name: 'Cinéma FR', subtitle: 'Film · émotion', sample: 'HISTOIRE', captionStyle: { preset: 'minimal', fontFamily: 'sans', fontSize: 41, textColor: '#f5e8d1', accentColor: '#c79960', uppercase: false, animation: 'fade' }, effect: 'grain', transitions: ['fade', 'zoom'], previewBackground: 'linear-gradient(145deg,#79502f,#15120f)', previewColor: '#f5e8d1' },
+  { id: 'fr-podcast', group: 'french', name: 'Podcast FR', subtitle: 'Interview · lisible', sample: 'PAROLE', captionStyle: { preset: 'box', fontFamily: 'sans', fontSize: 45, textColor: '#ffffff', accentColor: '#6b5cff', backgroundColor: '#6b5cff', uppercase: false, animation: 'pop' }, effect: 'enhance', transitions: ['slide', 'fade'], previewBackground: 'linear-gradient(145deg,#5447cc,#1b183b)', previewColor: '#ffffff' },
+  { id: 'fr-luxury', group: 'french', name: 'Luxe Français', subtitle: 'Chic · premium', sample: 'LUXE', captionStyle: { preset: 'minimal', fontFamily: 'rounded', fontSize: 46, textColor: '#e9d3a1', accentColor: '#b98c3b', uppercase: true, animation: 'fade' }, effect: 'glow', transitions: ['fade', 'rotate'], previewBackground: 'linear-gradient(145deg,#312c25,#0b0b0a)', previewColor: '#e9d3a1' },
+  { id: 'fr-social', group: 'french', name: 'Social Pop', subtitle: 'Reels · dynamique', sample: 'VIRAL', captionStyle: { preset: 'neon', fontFamily: 'rounded', fontSize: 51, textColor: '#edff47', accentColor: '#ff4f91', animation: 'pop' }, effect: 'glow', transitions: ['zoom', 'flash'], previewBackground: 'radial-gradient(circle,#f04891,#382061 68%)', previewColor: '#edff47' },
+  { id: 'fr-corporate', group: 'french', name: 'Corporate', subtitle: 'Entreprise · sérieux', sample: 'PRO', captionStyle: { preset: 'minimal', fontFamily: 'sans', fontSize: 42, textColor: '#ffffff', accentColor: '#4ca3ff', uppercase: false, animation: 'fade' }, effect: 'enhance', transitions: ['fade', 'slide'], previewBackground: 'linear-gradient(145deg,#315f91,#101a25)', previewColor: '#ffffff' },
+];
+
 function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
   const [step, setStep] = useState(1);
   const [topic, setTopic] = useState('');
   const [tone, setTone] = useState<'energetic' | 'educational' | 'sales' | 'story'>('energetic');
   const [duration, setDuration] = useState(30);
-  const [alphabet, setAlphabet] = useState<'latin' | 'arabic'>('latin');
+  const [alphabet, setAlphabet] = useState<'latin' | 'arabic' | 'french'>('latin');
   const [script, setScript] = useState<AutoScriptResult | null>(null);
+  const [manualScript, setManualScript] = useState('');
+  const [scriptSource, setScriptSource] = useState<'paste' | 'generate'>('paste');
   const [scriptLoading, setScriptLoading] = useState(false);
+  const [alignmentMode, setAlignmentMode] = useState<'exact_api_timestamps' | 'estimated_local' | null>(null);
+  const [apiWordTimings, setApiWordTimings] = useState<WordTiming[]>([]);
   const [visualAssets, setVisualAssets] = useState<MediaAsset[]>([]);
   const [voiceAsset, setVoiceAsset] = useState<MediaAsset | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dropActive, setDropActive] = useState(false);
-  const [template, setTemplate] = useState<'impact' | 'clean' | 'neon'>('impact');
+  const [template, setTemplate] = useState('dz-impact');
+  const [styleLanguage, setStyleLanguage] = useState<'all' | 'arabic' | 'french' | 'darija'>('all');
   const [project, setProject] = useState<AutoProject | null>(null);
+  const [scenePlan, setScenePlan] = useState<Array<{ sceneId: string; assetId: string; sourceStart: number; transition: TransitionType; semanticScore: number; reason: string }>>([]);
   const [assembling, setAssembling] = useState(false);
   const [assemblyProgress, setAssemblyProgress] = useState(0);
   const [rendering, setRendering] = useState(false);
   const [message, setMessage] = useState('');
   const visualInputRef = useRef<HTMLInputElement>(null);
   const voiceInputRef = useRef<HTMLInputElement>(null);
+  const timestampsInputRef = useRef<HTMLInputElement>(null);
 
   const uploadOne = async (file: File, index: number): Promise<MediaAsset> => {
     const kind: MediaAsset['kind'] = file.type.startsWith('video') ? 'video' : file.type.startsWith('audio') ? 'audio' : 'image';
@@ -1020,20 +1072,53 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
     setMessage('Import de la voix off…');
     const uploaded = await uploadOne(file, 5);
     setVoiceAsset(uploaded);
+    if (uploaded.duration) setDuration(Number(Math.min(90, uploaded.duration).toFixed(2)));
     setUploading(false);
     setMessage('Voix off prête.');
   };
 
+  const loadWordTimestamps = async (file?: File) => {
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const words = Array.isArray(parsed) ? parsed : Array.isArray(parsed.words) ? parsed.words : Array.isArray(parsed.timestamps) ? parsed.timestamps : [];
+      if (!words.length) throw new Error('Aucun timestamp trouvé');
+      setApiWordTimings(words);
+      setMessage(`${words.length} timestamps mot par mot chargés depuis l’API voix.`);
+    } catch {
+      setApiWordTimings([]);
+      setMessage('JSON invalide. Format attendu : [{ word, start, end }].');
+    }
+  };
+
+  const alignText = async (text: string, latinText = text, arabicText = text) => {
+    const response = await fetch('/api/align', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script: text, duration: voiceAsset?.duration ?? duration, wordTimestamps: apiWordTimings }) });
+    const alignment = await response.json();
+    if (!response.ok) throw new Error(alignment.error || 'Synchronisation impossible');
+    setAlignmentMode(alignment.mode);
+    setScript({ script: latinText, scriptAr: arabicText, captions: alignment.captions, engine: alignment.mode });
+    setManualScript(text);
+    setMessage(alignment.mode === 'exact_api_timestamps' ? `${alignment.wordCount} mots synchronisés exactement avec la voix.` : `${alignment.wordCount} mots alignés en mode estimé. Importe les timestamps API pour le mode exact.`);
+  };
+
+  const synchronizeManualScript = async () => {
+    if (!voiceAsset || manualScript.trim().length < 2) return;
+    setScriptLoading(true);
+    try { await alignText(manualScript.trim()); }
+    catch (error) { setMessage(error instanceof Error ? error.message : 'Synchronisation impossible'); }
+    finally { setScriptLoading(false); }
+  };
+
   const generateScript = async () => {
-    if (topic.trim().length < 3) return;
+    if (!voiceAsset || topic.trim().length < 3) return;
     setScriptLoading(true);
     setMessage('');
     try {
-      const response = await fetch('/api/script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic, tone, duration }) });
+      const response = await fetch('/api/script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic, tone, duration: voiceAsset.duration ?? duration }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Génération impossible');
-      setScript(data);
-      setMessage('Script prêt. Tu peux le relire puis continuer.');
+      const selectedText = alphabet === 'arabic' ? data.scriptAr : data.script;
+      await alignText(selectedText, data.script, data.scriptAr);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Génération impossible');
     } finally {
@@ -1041,33 +1126,30 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
     }
   };
 
-  const buildProject = () => {
+  const buildProject = (planning = scenePlan) => {
     if (!script || !visualAssets.length) return null;
     const projectDuration = duration;
-    const styleMap: Record<typeof template, CaptionStyle> = {
-      impact: { ...INITIAL_STYLE, preset: 'impact', fontFamily: 'impact', animation: 'pop' },
-      clean: { ...INITIAL_STYLE, preset: 'minimal', fontFamily: 'sans', fontSize: 44, accentColor: '#ffffff', animation: 'fade', shadow: true },
-      neon: { ...INITIAL_STYLE, preset: 'neon', fontFamily: 'rounded', textColor: '#f8ff3e', accentColor: '#9a68ff', backgroundColor: '#251643', animation: 'pop' },
-    };
+    const selectedStyle = AUTO_STYLES.find((style) => style.id === template) ?? AUTO_STYLES[0];
+    const resolvedCaptionStyle: CaptionStyle = { ...INITIAL_STYLE, ...selectedStyle.captionStyle };
     const outputCaptions = script.captions.map((caption) => ({ ...caption, text: alphabet === 'arabic' ? caption.textAr ?? caption.text : caption.text }));
-    const clipCount = Math.max(visualAssets.length, Math.ceil(projectDuration / 5));
-    const segmentDuration = projectDuration / clipCount;
-    const visualClips: TimelineClip[] = Array.from({ length: clipCount }, (_, index) => {
-      const asset = visualAssets[index % visualAssets.length];
+    const planByScene = new Map(planning.map((scene) => [scene.sceneId, scene]));
+    const visualClips: TimelineClip[] = outputCaptions.map((caption, index) => {
+      const planned = planByScene.get(caption.id);
+      const asset = visualAssets.find((item) => item.id === planned?.assetId) ?? visualAssets[index % visualAssets.length];
       return {
         id: `auto-visual-${index}`,
         trackId: 'video-main',
         assetId: asset.id,
         kind: asset.kind,
         name: asset.name,
-        start: Number((index * segmentDuration).toFixed(3)),
-        duration: Number(segmentDuration.toFixed(3)),
-        sourceStart: 0,
+        start: caption.start,
+        duration: Math.max(.2, caption.end - caption.start),
+        sourceStart: planned?.sourceStart ?? 0,
         color: asset.color,
         x: 0, y: 0, scale: 1, rotation: 0, opacity: 1,
-        transitionIn: (['fade', 'slide', 'zoom'] as TransitionType[])[index % 3],
-        transitionDuration: .38,
-        effect: template === 'neon' ? 'glow' : template === 'clean' ? 'enhance' : 'none',
+        transitionIn: selectedStyle.transitions[index % selectedStyle.transitions.length] ?? planned?.transition ?? 'fade',
+        transitionDuration: .32,
+        effect: selectedStyle.effect,
       };
     });
     const tracks: TimelineTrack[] = [
@@ -1075,24 +1157,33 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
       { id: 'captions', name: 'Captions Darija', kind: 'caption', locked: false, muted: false, clips: outputCaptions.map((caption) => ({ id: `timeline-${caption.id}`, trackId: 'captions', kind: 'caption', name: caption.text, text: caption.text, start: caption.start, duration: caption.end - caption.start, sourceStart: 0, color: '#6658b8' })) },
     ];
     if (voiceAsset) tracks.push({ id: 'voice', name: 'Voix off', kind: 'audio', locked: false, muted: false, clips: [{ id: 'clip-voice', trackId: 'voice', assetId: voiceAsset.id, kind: 'audio', name: voiceAsset.name, start: 0, duration: Math.min(projectDuration, voiceAsset.duration ?? projectDuration), sourceStart: 0, color: '#23896d', volume: 1, noiseReduction: true }] });
-    return { version: 2, projectName: topic.slice(0, 60), tracks, captions: outputCaptions, captionStyle: styleMap[template], assets: [...visualAssets, ...(voiceAsset ? [voiceAsset] : [])] } satisfies AutoProject;
+    return { version: 2, projectName: (topic.trim() || manualScript.split(/\s+/).slice(0, 7).join(' ') || 'Montage Darija').slice(0, 60), tracks, captions: outputCaptions, captionStyle: resolvedCaptionStyle, assets: [...visualAssets, ...(voiceAsset ? [voiceAsset] : [])] } satisfies AutoProject;
   };
 
   const assembleProject = async () => {
-    const nextProject = buildProject();
-    if (!nextProject) return;
+    if (!script || !visualAssets.length || !voiceAsset) return;
     setAssembling(true);
-    setAssemblyProgress(14);
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    setAssemblyProgress(46);
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    window.localStorage.setItem('darja-studio-project-v2', JSON.stringify(nextProject));
-    setAssemblyProgress(78);
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    setProject(nextProject);
-    setAssemblyProgress(100);
-    setAssembling(false);
-    setMessage('Projet automatique prêt. Tu peux l’exporter ou l’affiner.');
+    setAssemblyProgress(18);
+    setMessage('Analyse du script et des médias…');
+    try {
+      const response = await fetch('/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tone, captions: script.captions, assets: visualAssets.map(({ id, name, kind, duration: assetDuration, description }) => ({ id, name, kind, duration: assetDuration, description })) }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Planification impossible');
+      const planning = data.scenes as Array<{ sceneId: string; assetId: string; sourceStart: number; transition: TransitionType; semanticScore: number; reason: string }>;
+      setScenePlan(planning);
+      setAssemblyProgress(58);
+      const nextProject = buildProject(planning);
+      if (!nextProject) throw new Error('Projet incomplet');
+      window.localStorage.setItem('darja-studio-project-v2', JSON.stringify(nextProject));
+      setAssemblyProgress(86);
+      setProject(nextProject);
+      setAssemblyProgress(100);
+      setMessage(`${planning.length} scènes montées : plans choisis, captions synchronisées et transitions appliquées.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Montage automatique impossible');
+    } finally {
+      setAssembling(false);
+    }
   };
 
   const exportProject = async () => {
@@ -1119,12 +1210,13 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
   };
 
   const steps = [
-    { id: 1, label: 'Script', hint: 'Ton idée', icon: FileText, done: Boolean(script) },
-    { id: 2, label: 'Voix', hint: 'Audio optionnel', icon: Mic2, done: Boolean(voiceAsset) },
-    { id: 3, label: 'Médias', hint: 'Tes vidéos', icon: Clapperboard, done: visualAssets.length > 0 },
-    { id: 4, label: 'Style', hint: 'Générer', icon: Palette, done: Boolean(project) },
+    { id: 1, label: 'Voix off', hint: 'Audio + timestamps', icon: Mic2, done: Boolean(voiceAsset) },
+    { id: 2, label: 'Script & sync', hint: 'Chaque mot', icon: FileText, done: Boolean(script) },
+    { id: 3, label: 'Vidéos', hint: 'Plans à choisir', icon: Clapperboard, done: visualAssets.length > 0 },
+    { id: 4, label: 'Style & montage', hint: 'IA automatique', icon: Palette, done: Boolean(project) },
   ];
   const firstVisual = visualAssets[0];
+  const selectedAutoStyle = AUTO_STYLES.find((style) => style.id === template) ?? AUTO_STYLES[0];
 
   return (
     <div className="auto-app">
@@ -1135,7 +1227,7 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
       </header>
 
       <main className="auto-main">
-        <section className="auto-intro"><span className="auto-kicker"><Rocket size={13} /> Simple, rapide, 100% Darija</span><h1>Men l’idée l vidéo.<br/><em>Bla ta3qid.</em></h1><p>Ajoute ton sujet, ta voix et tes médias. Darja Studio construit le montage automatiquement.</p></section>
+        <section className="auto-intro"><span className="auto-kicker"><Rocket size={13} /> Voice-first · captions mot par mot</span><h1>Men la voix l vidéo.<br/><em>Kolchi synchronisé.</em></h1><p>Ajoute ta voix off et ton script. Le moteur aligne chaque mot, choisit les bons plans et termine le montage.</p></section>
 
         <nav className="auto-steps" aria-label="Étapes de création">
           {steps.map(({ id, label, hint, icon: Icon, done }, index) => <button key={id} className={`${step === id ? 'active' : ''} ${done ? 'done' : ''}`} onClick={() => setStep(id)}><i>{done ? <Check size={15} /> : <Icon size={16} />}</i><span><strong>{label}</strong><small>{hint}</small></span>{index < steps.length - 1 && <ChevronStep />}</button>)}
@@ -1143,41 +1235,55 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
 
         <section className="auto-workspace">
           <div className="auto-panel">
-            {step === 1 && <div className="auto-step-content script-step">
-              <div className="auto-section-title"><span>01</span><div><h2>Qu’est-ce que tu veux raconter ?</h2><p>Une phrase suffit. Le générateur écrit le reste en darija.</p></div></div>
-              <label className="auto-topic"><textarea value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Exemple : présenter ma nouvelle application de livraison…" maxLength={120}/><small>{topic.length}/120</small></label>
-              <div className="auto-options"><label>Ton<select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)}><option value="energetic">Énergique</option><option value="educational">Éducatif</option><option value="sales">Commercial</option><option value="story">Storytelling</option></select></label><label>Durée<select value={duration} onChange={(event) => setDuration(Number(event.target.value))}><option value="15">15 secondes</option><option value="30">30 secondes</option></select></label><label>Écriture<select value={alphabet} onChange={(event) => setAlphabet(event.target.value as typeof alphabet)}><option value="latin">Darija latin</option><option value="arabic">دارجة عربية</option></select></label></div>
-              <button className="auto-primary" onClick={generateScript} disabled={scriptLoading || topic.trim().length < 3}>{scriptLoading ? <><RotateCcw className="spin" size={17}/> Kaykteb…</> : <><Sparkles size={17}/> Générer mon script</>}</button>
-              {script && <div className="auto-script-result" dir={alphabet === 'arabic' ? 'rtl' : 'ltr'}><div><span><CheckCircle2 size={15}/> Script prêt</span><small>{script.captions.length} scènes · {duration}s</small></div><textarea value={alphabet === 'arabic' ? script.scriptAr : script.script} readOnly/><button onClick={() => setStep(2)}>Continuer vers la voix <ArrowRight size={15}/></button></div>}
+            {step === 1 && <div className="auto-step-content voice-first-step">
+              <div className="auto-section-title"><span>01</span><div><h2>Commence par la voix off</h2><p>La durée de l’audio devient automatiquement la durée du montage.</p></div></div>
+              {!voiceAsset ? <button className="auto-upload-zone voice-zone" onClick={() => voiceInputRef.current?.click()}><i><Mic2 size={25}/></i><strong>Importer la voix off</strong><span>MP3, WAV, M4A ou AAC</span></button> : <div className="voice-ready"><i><Volume2 size={22}/></i><div><strong>{voiceAsset.name}</strong><span>{voiceAsset.duration ? `${voiceAsset.duration.toFixed(2)} secondes détectées` : 'Audio prêt'}</span></div><audio controls src={voiceAsset.url}/><button onClick={() => { setVoiceAsset(null); setScript(null); setAlignmentMode(null); }}><Trash2 size={15}/></button></div>}
+              <input ref={voiceInputRef} type="file" hidden accept="audio/*" onChange={(event) => { void addVoiceFile(event.target.files?.[0]); event.target.value = ''; }}/>
+              {voiceAsset && <div className="timestamps-card"><div><i><Sparkles size={17}/></i><span><strong>Tu as les timestamps de ton API voix ?</strong><small>Importe le JSON mot par mot pour une synchronisation exacte.</small></span></div><button onClick={() => timestampsInputRef.current?.click()}>{apiWordTimings.length ? <><Check size={14}/> {apiWordTimings.length} mots chargés</> : <><UploadCloud size={14}/> Importer JSON</>}</button><input ref={timestampsInputRef} type="file" hidden accept=".json,application/json" onChange={(event) => { void loadWordTimestamps(event.target.files?.[0]); event.target.value = ''; }}/></div>}
+              <div className="alignment-explainer"><span className={apiWordTimings.length ? 'exact' : ''}>{apiWordTimings.length ? 'Mode exact API' : 'Mode estimé disponible'}</span><p>{apiWordTimings.length ? 'Chaque mot utilisera le start/end fourni par la génération de voix.' : 'Sans JSON, le moteur répartit les mots selon la durée. Pour du vrai mot-à-mot exact, utilise les timestamps de ta plateforme voix.'}</p></div>
+              <div className="auto-step-actions"><button className="auto-primary compact" disabled={!voiceAsset || uploading} onClick={() => setStep(2)}>Ajouter le script <ArrowRight size={15}/></button></div>
             </div>}
 
-            {step === 2 && <div className="auto-step-content">
-              <div className="auto-section-title"><span>02</span><div><h2>Ajoute ta voix off</h2><p>Importe la voix déjà générée sur ta plateforme. Cette étape reste optionnelle.</p></div></div>
-              {!voiceAsset ? <button className="auto-upload-zone voice-zone" onClick={() => voiceInputRef.current?.click()}><i><Mic2 size={25}/></i><strong>Importer la voix off</strong><span>MP3, WAV, M4A ou AAC</span></button> : <div className="voice-ready"><i><Volume2 size={22}/></i><div><strong>{voiceAsset.name}</strong><span>{voiceAsset.duration ? `${voiceAsset.duration.toFixed(1)} secondes` : 'Audio prêt'}</span></div><audio controls src={voiceAsset.url}/><button onClick={() => setVoiceAsset(null)}><Trash2 size={15}/></button></div>}
-              <input ref={voiceInputRef} type="file" hidden accept="audio/*" onChange={(event) => { void addVoiceFile(event.target.files?.[0]); event.target.value = ''; }}/>
-              <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(1)}><ArrowLeft size={15}/> Retour</button><button className="auto-primary compact" onClick={() => setStep(3)}>{voiceAsset ? 'Continuer' : 'Passer sans voix'} <ArrowRight size={15}/></button></div>
+            {step === 2 && <div className="auto-step-content script-sync-step">
+              <div className="auto-section-title"><span>02</span><div><h2>Script et synchronisation mot par mot</h2><p>Colle ton script existant ou laisse le générateur l’écrire.</p></div></div>
+              <div className="script-source-switch"><button className={scriptSource === 'paste' ? 'active' : ''} onClick={() => setScriptSource('paste')}><FileText size={14}/> Coller mon script</button><button className={scriptSource === 'generate' ? 'active' : ''} onClick={() => setScriptSource('generate')}><Sparkles size={14}/> Générer un script</button></div>
+              {scriptSource === 'paste' ? <>
+                <label className="auto-topic script-paste"><textarea value={manualScript} onChange={(event) => { setManualScript(event.target.value); setScript(null); }} placeholder="Colle ici exactement le script utilisé pour générer la voix off…" maxLength={12000}/><small>{manualScript.trim().split(/\s+/).filter(Boolean).length} mots</small></label>
+                <div className="auto-options sync-options"><label>Écriture<select value={alphabet} onChange={(event) => setAlphabet(event.target.value as typeof alphabet)}><option value="latin">Darija latin</option><option value="arabic">Arabe / العربية</option><option value="french">Français</option></select></label><label>Durée détectée<div className="detected-duration">{(voiceAsset?.duration ?? duration).toFixed(2)} secondes</div></label></div>
+                <button className="auto-primary" onClick={synchronizeManualScript} disabled={scriptLoading || !voiceAsset || manualScript.trim().length < 2}>{scriptLoading ? <><RotateCcw className="spin" size={17}/> Synchronisation…</> : <><Sparkles size={17}/> Synchroniser chaque mot</>}</button>
+              </> : <>
+                <label className="auto-topic"><textarea value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Exemple : présenter ma nouvelle application de livraison…" maxLength={120}/><small>{topic.length}/120</small></label>
+                <div className="auto-options"><label>Ton<select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)}><option value="energetic">Énergique</option><option value="educational">Éducatif</option><option value="sales">Commercial</option><option value="story">Storytelling</option></select></label><label>Durée<div className="detected-duration">{(voiceAsset?.duration ?? duration).toFixed(2)}s</div></label><label>Écriture<select value={alphabet} onChange={(event) => setAlphabet(event.target.value as typeof alphabet)}><option value="latin">Darija latin</option><option value="arabic">دارجة عربية</option></select></label></div>
+                <button className="auto-primary" onClick={generateScript} disabled={scriptLoading || !voiceAsset || topic.trim().length < 3}>{scriptLoading ? <><RotateCcw className="spin" size={17}/> Génération + sync…</> : <><Sparkles size={17}/> Générer et synchroniser</>}</button>
+              </>}
+              {script && <div className={`auto-script-result word-sync-result ${alignmentMode === 'exact_api_timestamps' ? 'exact' : ''}`} dir={alphabet === 'arabic' ? 'rtl' : 'ltr'}><div><span><CheckCircle2 size={15}/> {alignmentMode === 'exact_api_timestamps' ? 'Synchronisation exacte' : 'Synchronisation estimée'}</span><small>{script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots · {script.captions.length} scènes</small></div><div className="word-timing-preview">{script.captions.flatMap((caption) => caption.words ?? []).slice(0, 18).map((word, index) => <span key={`${word.start}-${index}`}><b>{word.word}</b><small>{word.start.toFixed(2)}s</small></span>)}</div><button onClick={() => setStep(3)}>Ajouter les vidéos <ArrowRight size={15}/></button></div>}
+              <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(1)}><ArrowLeft size={15}/> Retour à la voix</button></div>
             </div>}
 
             {step === 3 && <div className="auto-step-content">
-              <div className="auto-section-title"><span>03</span><div><h2>Dépose tes vidéos</h2><p>L’ordre peut être changé ensuite dans l’éditeur avancé.</p></div></div>
+              <div className="auto-section-title"><span>03</span><div><h2>Ajoute les plans disponibles</h2><p>Décris chaque plan en quelques mots : le moteur choisira celui qui correspond au script.</p></div></div>
               <div className={`auto-upload-zone media-zone ${dropActive ? 'active' : ''}`} onClick={() => visualInputRef.current?.click()} onDragOver={(event) => { event.preventDefault(); setDropActive(true); }} onDragLeave={() => setDropActive(false)} onDrop={(event) => { event.preventDefault(); setDropActive(false); void addVisualFiles(Array.from(event.dataTransfer.files)); }}><i><UploadCloud size={27}/></i><strong>{uploading ? 'Import en cours…' : 'Glisse tes vidéos et images ici'}</strong><span>ou clique pour parcourir · jusqu’à 500 Mo par fichier</span></div>
               <input ref={visualInputRef} type="file" hidden multiple accept="video/*,image/*" onChange={(event) => { void addVisualFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }}/>
-              {visualAssets.length > 0 && <div className="auto-media-list">{visualAssets.map((asset, index) => <div key={asset.id}><div>{asset.kind === 'image' && asset.url ? <img src={asset.url} alt=""/> : asset.kind === 'video' && asset.url ? <video src={asset.url} muted preload="metadata"/> : <Clapperboard size={18}/>}<span>{index + 1}</span></div><p>{asset.name}</p><button onClick={() => setVisualAssets((items) => items.filter((item) => item.id !== asset.id))}><X size={13}/></button></div>)}</div>}
+              {visualAssets.length > 0 && <div className="auto-media-list">{visualAssets.map((asset, index) => <div key={asset.id}><div>{asset.kind === 'image' && asset.url ? <img src={asset.url} alt=""/> : asset.kind === 'video' && asset.url ? <video src={asset.url} muted preload="metadata"/> : <Clapperboard size={18}/>}<span>{index + 1}</span></div><p>{asset.name}</p><input value={asset.description ?? ''} onChange={(event) => setVisualAssets((items) => items.map((item) => item.id === asset.id ? { ...item, description: event.target.value } : item))} placeholder="Décris ce plan…"/><button onClick={() => setVisualAssets((items) => items.filter((item) => item.id !== asset.id))}><X size={13}/></button></div>)}</div>}
               <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(2)}><ArrowLeft size={15}/> Retour</button><button className="auto-primary compact" disabled={!visualAssets.length || uploading} onClick={() => setStep(4)}>Choisir le style <ArrowRight size={15}/></button></div>
             </div>}
 
             {step === 4 && <div className="auto-step-content style-step">
-              <div className="auto-section-title"><span>04</span><div><h2>Choisis le rythme</h2><p>Le style applique automatiquement captions, effets et transitions.</p></div></div>
-              <div className="auto-template-grid"><button className={template === 'impact' ? 'active impact' : 'impact'} onClick={() => setTemplate('impact')}><div><strong>IMPACT</strong><span>Énergique</span></div><small>Captions bold · cuts rapides</small></button><button className={template === 'clean' ? 'active clean' : 'clean'} onClick={() => setTemplate('clean')}><div><strong>Clean.</strong><span>Élégant</span></div><small>Minimal · transitions douces</small></button><button className={template === 'neon' ? 'active neon' : 'neon'} onClick={() => setTemplate('neon')}><div><strong>NEON</strong><span>Social</span></div><small>Glow · couleurs pop</small></button></div>
-              <div className="auto-summary"><div><FileText size={16}/><span><strong>{script ? `${script.captions.length} scènes` : 'Script manquant'}</strong><small>{duration} secondes</small></span></div><div><Mic2 size={16}/><span><strong>{voiceAsset ? 'Voix ajoutée' : 'Sans voix'}</strong><small>{voiceAsset?.name ?? 'Tu peux continuer'}</small></span></div><div><Clapperboard size={16}/><span><strong>{visualAssets.length} médias</strong><small>Montage automatique</small></span></div></div>
-              {!project ? <button className="auto-generate-video" onClick={assembleProject} disabled={!script || !visualAssets.length || assembling}>{assembling ? <><RotateCcw className="spin" size={18}/> Construction {assemblyProgress}%</> : <><Rocket size={18}/> Construire ma vidéo</>}</button> : <div className="auto-ready-actions"><div><CheckCircle2 size={21}/><span><strong>Ton montage est prêt</strong><small>Tu peux l’exporter directement ou modifier chaque détail.</small></span></div><button onClick={exportProject} disabled={rendering}><Download size={16}/>{rendering ? 'Rendu en cours…' : 'Exporter MP4'}</button><button onClick={onOpenAdvanced}><SlidersHorizontal size={16}/> Affiner le montage</button></div>}
+              <div className="auto-section-title"><span>04</span><div><h2>Style et montage intelligent</h2><p>Le moteur associe chaque scène du script au plan le plus pertinent.</p></div></div>
+              <div className="style-language-filter"><button className={styleLanguage === 'all' ? 'active' : ''} onClick={() => setStyleLanguage('all')}>Tous</button><button className={styleLanguage === 'arabic' ? 'active' : ''} onClick={() => setStyleLanguage('arabic')}>Arabe</button><button className={styleLanguage === 'french' ? 'active' : ''} onClick={() => setStyleLanguage('french')}>Français</button><button className={styleLanguage === 'darija' ? 'active' : ''} onClick={() => setStyleLanguage('darija')}>Darija</button></div>
+              <div className="style-count"><strong>{AUTO_STYLES.filter((style) => styleLanguage === 'all' || style.group === styleLanguage).length} styles</strong><span>Chaque style change captions, couleurs, effets et transitions.</span></div>
+              <div className="auto-template-grid expanded style-library">
+                {AUTO_STYLES.filter((style) => styleLanguage === 'all' || style.group === styleLanguage).map((style) => <button key={style.id} className={`auto-style-card ${template === style.id ? 'active' : ''}`} onClick={() => { setTemplate(style.id); setProject(null); }}><div dir={style.group === 'arabic' ? 'rtl' : 'ltr'} style={{ background: style.previewBackground, color: style.previewColor }}><strong>{style.sample}</strong><span>{style.name}</span></div><small>{style.subtitle}</small>{template === style.id && <i><Check size={12}/></i>}</button>)}
+              </div>
+              <div className="auto-summary"><div><FileText size={16}/><span><strong>{script ? `${script.captions.length} scènes · ${script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots` : 'Script manquant'}</strong><small>{alignmentMode === 'exact_api_timestamps' ? 'Timing exact API' : 'Timing estimé'}</small></span></div><div><Mic2 size={16}/><span><strong>{voiceAsset ? 'Voix synchronisée' : 'Voix manquante'}</strong><small>{voiceAsset?.name ?? 'Requis'}</small></span></div><div><Clapperboard size={16}/><span><strong>{visualAssets.length} médias</strong><small>Montage automatique</small></span></div></div>
+              {!project ? <button className="auto-generate-video" onClick={assembleProject} disabled={!script || !voiceAsset || !visualAssets.length || assembling}>{assembling ? <><RotateCcw className="spin" size={18}/> Construction {assemblyProgress}%</> : <><Rocket size={18}/> Construire ma vidéo</>}</button> : <div className="auto-ready-actions"><div><CheckCircle2 size={21}/><span><strong>Ton montage est prêt</strong><small>Tu peux l’exporter directement ou modifier chaque détail.</small></span></div><button onClick={exportProject} disabled={rendering}><Download size={16}/>{rendering ? 'Rendu en cours…' : 'Exporter MP4'}</button><button onClick={onOpenAdvanced}><SlidersHorizontal size={16}/> Affiner le montage</button></div>}
               <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(3)}><ArrowLeft size={15}/> Retour</button></div>
             </div>}
           </div>
 
           <aside className="auto-preview-card">
             <div className="auto-preview-head"><span><MonitorPlay size={14}/> Aperçu</span><small>9:16 · {duration}s</small></div>
-            <div className="auto-phone-preview">{firstVisual?.url ? (firstVisual.kind === 'image' ? <img src={firstVisual.url} alt=""/> : <video src={firstVisual.url} muted autoPlay loop playsInline/>) : <div className="auto-preview-empty"><Smartphone size={30}/><span>Ton aperçu apparaîtra ici</span></div>}<div className={`auto-caption-demo ${template}`}>{script ? (alphabet === 'arabic' ? script.captions[0]?.textAr : script.captions[0]?.text) : 'CAPTIONS DARIJA'}</div><i className="auto-phone-progress"/></div>
+            <div className="auto-phone-preview">{firstVisual?.url ? (firstVisual.kind === 'image' ? <img src={firstVisual.url} alt=""/> : <video src={firstVisual.url} muted autoPlay loop playsInline/>) : <div className="auto-preview-empty"><Smartphone size={30}/><span>Ton aperçu apparaîtra ici</span></div>}<div className={`auto-caption-demo preset-${selectedAutoStyle.captionStyle.preset ?? 'impact'}`} style={{ color: selectedAutoStyle.captionStyle.textColor, background: selectedAutoStyle.captionStyle.preset === 'box' ? selectedAutoStyle.captionStyle.backgroundColor : undefined, textDecorationColor: selectedAutoStyle.captionStyle.accentColor }}>{script ? (alphabet === 'arabic' ? script.captions[0]?.textAr ?? script.captions[0]?.text : script.captions[0]?.text) : 'CAPTIONS DARIJA'}</div><i className="auto-phone-progress"/></div>
             <div className="auto-preview-stats"><span><Sparkles size={13}/> Auto captions</span><span><Clapperboard size={13}/> Auto cuts</span></div>
           </aside>
         </section>
