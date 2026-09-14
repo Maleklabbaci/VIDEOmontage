@@ -1,0 +1,32 @@
+.caption-format-card { padding: 10px; display: flex; flex-direction: column; gap: 9px; border: 1px solid #363945; border-radius: 10px; background: linear-gradient(145deg,rgba(117,103,255,.08),rgba(25,27,33,.96)); }
+.caption-format-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.caption-format-title > div { display: flex; align-items: center; gap: 7px; color: #a99fff; }
+.caption-format-title span { display: flex; flex-direction: column; gap: 1px; }
+.caption-format-title strong { color: #e0e1e6; font-size: 8.8px; }
+.caption-format-title small { color: #6f7480; font-size: 6.8px; }
+.caption-format-title > b { padding: 4px 7px; color: #bdb7ff; border: 1px solid rgba(117,103,255,.3); border-radius: 99px; background: rgba(117,103,255,.1); font-size: 6.8px; white-space: nowrap; }
+.caption-control-row { display: grid; grid-template-columns: 75px 1fr; gap: 8px; align-items: center; }
+.caption-control-row > label { color: #898e98; font-size: 7.4px; font-weight: 700; }
+.caption-control-row > label b { color: #c8cad1; font-size: inherit; }
+.caption-word-buttons, .caption-size-controls { display: flex; align-items: center; gap: 4px; }
+.caption-word-buttons > button, .caption-size-controls > button, .caption-case-toggle { min-height: 27px; padding: 0 8px; color: #898e98; border: 1px solid #3a3d47; border-radius: 6px; background: #202229; font-size: 7px; font-weight: 750; cursor: pointer; }
+.caption-word-buttons > button.active, .caption-size-controls > button.active, .caption-case-toggle.active { color: #e1deff; border-color: #7567ff; background: rgba(117,103,255,.16); }
+.caption-word-buttons > label { height: 27px; padding-left: 7px; display: flex; align-items: center; gap: 4px; color: #888d97; border: 1px solid #3a3d47; border-radius: 6px; background: #202229; font-size: 6.8px; }
+.caption-word-buttons > label.active { color: #e1deff; border-color: #7567ff; }
+.caption-word-buttons input { width: 29px; height: 19px; padding: 0 3px; color: #e4e5e9; border: 0; border-left: 1px solid #3b3e48; outline: none; background: transparent; font-size: 7.5px; }
+.caption-size-controls input[type="range"], .caption-control-row.compact input[type="range"] { min-width: 65px; flex: 1; accent-color: #7567ff; }
+.caption-control-row.compact { grid-template-columns: 75px 1fr auto; }
+.caption-live-sample { min-height: 50px; padding: 9px; display: grid; place-items: center; color: #ffffff; border: 1px solid #30333c; border-radius: 8px; background: radial-gradient(circle at 60% 20%,#444650,#17191e 72%); line-height: 1; text-align: center; text-shadow: 0 2px 4px #000; overflow: hidden; }
+
+@media (max-width: 720px) {
+  .caption-format-card { padding: 12px; }
+  .caption-format-title { align-items: flex-start; }
+  .caption-format-title small { max-width: 220px; white-space: normal; }
+  .caption-control-row, .caption-control-row.compact { grid-template-columns: 1fr; gap: 6px; }
+  .caption-word-buttons, .caption-size-controls { flex-wrap: wrap; }
+  .caption-word-buttons > button, .caption-size-controls > button { min-height: 34px; flex: 1; }
+  .caption-word-buttons > label { min-height: 34px; }
+  .caption-size-controls input[type="range"], .caption-control-row.compact input[type="range"] { min-height: 30px; width: 100%; }
+  .caption-case-toggle { min-height: 34px; width: 54px; }
+  .caption-live-sample { min-height: 70px; }
+}

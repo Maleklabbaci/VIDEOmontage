@@ -16,6 +16,9 @@ npm run dev
 - import optionnel des scripts/timestamps exacts `{ word, start, end }` fournis par la plateforme voix ;
 - correction manuelle du texte transcrit et réalignement disponible ;
 - captions karaoke mot par mot dans la preview et l’export FFmpeg/ASS ;
+- captions configurables à 1, 2, 3 ou jusqu’à 10 mots, avec mode automatique ;
+- taille de police 20–72 px, petite par défaut, position verticale et majuscules réglables ;
+- découpage des captions indépendant des plans vidéo pour conserver un montage fluide ;
 - planificateur sémantique qui associe chaque scène aux noms/descriptions des médias ;
 - 24 thèmes complets : 8 Darija, 8 arabes et 8 français ;
 - 24 vraies polices open source et self-hosted, choisissables indépendamment des thèmes ;

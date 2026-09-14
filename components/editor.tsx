@@ -968,6 +968,54 @@ type AutoProject = {
   assets: MediaAsset[];
 };
 
+type CaptionGroupSize = 'auto' | number;
+
+function regroupCaptions(captions: Caption[], groupSize: CaptionGroupSize): Caption[] {
+  if (groupSize === 'auto') return captions.map((caption, index) => ({ ...caption, id: `caption-auto-${index}` }));
+  const size = Math.max(1, Math.min(10, Math.round(groupSize)));
+  const words = captions.flatMap((caption) => caption.words ?? []);
+  if (!words.length) return captions;
+  const result: Caption[] = [];
+  for (let index = 0; index < words.length; index += size) {
+    const group = words.slice(index, index + size);
+    result.push({
+      id: `caption-${size}-${index / size}`,
+      start: group[0].start,
+      end: group.at(-1)!.end,
+      text: group.map((word) => word.word).join(' ').replace(/\s+([,.!?،؛])/g, '$1'),
+      words: group,
+    });
+  }
+  return result;
+}
+
+function createMontageScenes(captions: Caption[]): Caption[] {
+  if (!captions.length) return [];
+  const scenes: Caption[] = [];
+  let group: Caption[] = [];
+  const flush = () => {
+    if (!group.length) return;
+    const words = group.flatMap((caption) => caption.words ?? []);
+    scenes.push({
+      id: `montage-scene-${scenes.length}`,
+      start: group[0].start,
+      end: group.at(-1)!.end,
+      text: group.map((caption) => caption.text).join(' '),
+      words: words.length ? words : undefined,
+    });
+    group = [];
+  };
+  captions.forEach((caption, index) => {
+    const previous = group.at(-1);
+    if (previous && caption.start - previous.end > .9 && previous.end - group[0].start >= 2.2) flush();
+    group.push(caption);
+    const span = caption.end - group[0].start;
+    const sentenceEnd = /[.!?،؛]$/.test(caption.text.trim());
+    if ((span >= 3 && sentenceEnd) || span >= 5.2 || index === captions.length - 1) flush();
+  });
+  return scenes;
+}
+
 type AutoStyleDefinition = {
   id: string;
   group: 'darija' | 'arabic' | 'french';
@@ -1030,6 +1078,10 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
   const [dropActive, setDropActive] = useState(false);
   const [template, setTemplate] = useState('dz-impact');
   const [captionFont, setCaptionFont] = useState<CaptionFontId>('anton');
+  const [captionGroupSize, setCaptionGroupSize] = useState<CaptionGroupSize>(2);
+  const [captionFontSize, setCaptionFontSize] = useState(36);
+  const [captionPosition, setCaptionPosition] = useState(78);
+  const [captionUppercase, setCaptionUppercase] = useState(false);
   const [styleLanguage, setStyleLanguage] = useState<'all' | 'arabic' | 'french' | 'darija'>('all');
   const [fontLanguage, setFontLanguage] = useState<'all' | 'arabic' | 'latin'>('all');
   const [project, setProject] = useState<AutoProject | null>(null);
@@ -1163,11 +1215,12 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
     if (!script || !visualAssets.length) return null;
     const projectDuration = duration;
     const selectedStyle = AUTO_STYLES.find((style) => style.id === template) ?? AUTO_STYLES[0];
-    const resolvedCaptionStyle: CaptionStyle = { ...INITIAL_STYLE, ...selectedStyle.captionStyle, fontFamily: captionFont };
-    const outputCaptions = script.captions.map((caption) => ({ ...caption, text: alphabet === 'arabic' ? caption.textAr ?? caption.text : caption.text }));
+    const resolvedCaptionStyle: CaptionStyle = { ...INITIAL_STYLE, ...selectedStyle.captionStyle, fontFamily: captionFont, fontSize: captionFontSize, position: captionPosition, uppercase: captionUppercase };
+    const outputCaptions = regroupCaptions(script.captions, captionGroupSize).map((caption) => ({ ...caption, text: alphabet === 'arabic' ? caption.textAr ?? caption.text : caption.text }));
+    const montageScenes = createMontageScenes(script.captions);
     const planByScene = new Map(planning.map((scene) => [scene.sceneId, scene]));
-    const visualClips: TimelineClip[] = outputCaptions.map((caption, index) => {
-      const planned = planByScene.get(caption.id);
+    const visualClips: TimelineClip[] = montageScenes.map((scene, index) => {
+      const planned = planByScene.get(scene.id);
       const asset = visualAssets.find((item) => item.id === planned?.assetId) ?? visualAssets[index % visualAssets.length];
       return {
         id: `auto-visual-${index}`,
@@ -1175,8 +1228,8 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
         assetId: asset.id,
         kind: asset.kind,
         name: asset.name,
-        start: caption.start,
-        duration: Math.max(.2, caption.end - caption.start),
+        start: scene.start,
+        duration: Math.max(.2, scene.end - scene.start),
         sourceStart: planned?.sourceStart ?? 0,
         color: asset.color,
         x: 0, y: 0, scale: 1, rotation: 0, opacity: 1,
@@ -1199,7 +1252,8 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
     setAssemblyProgress(18);
     setMessage('Analyse du script et des médias…');
     try {
-      const response = await fetch('/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tone, captions: script.captions, assets: visualAssets.map(({ id, name, kind, duration: assetDuration, description }) => ({ id, name, kind, duration: assetDuration, description })) }) });
+      const montageScenes = createMontageScenes(script.captions);
+      const response = await fetch('/api/plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tone, captions: montageScenes, assets: visualAssets.map(({ id, name, kind, duration: assetDuration, description }) => ({ id, name, kind, duration: assetDuration, description })) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Planification impossible');
       const planning = data.scenes as Array<{ sceneId: string; assetId: string; sourceStart: number; transition: TransitionType; semanticScore: number; reason: string }>;
@@ -1250,6 +1304,8 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
   ];
   const firstVisual = visualAssets[0];
   const selectedAutoStyle = AUTO_STYLES.find((style) => style.id === template) ?? AUTO_STYLES[0];
+  const formattedCaptions = script ? regroupCaptions(script.captions, captionGroupSize) : [];
+  const captionPreviewText = formattedCaptions[0]?.text ?? 'CAPTION';
 
   return (
     <div className="auto-app">
@@ -1291,7 +1347,8 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
                 <div className="auto-options"><label>Ton<select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)}><option value="energetic">Énergique</option><option value="educational">Éducatif</option><option value="sales">Commercial</option><option value="story">Storytelling</option></select></label><label>Durée<div className="detected-duration">{(voiceAsset?.duration ?? duration).toFixed(2)}s</div></label><label>Écriture<select value={alphabet} onChange={(event) => setAlphabet(event.target.value as typeof alphabet)}><option value="latin">Darija latin</option><option value="arabic">دارجة عربية</option></select></label></div>
                 <button className="auto-primary" onClick={generateScript} disabled={scriptLoading || !voiceAsset || topic.trim().length < 3}>{scriptLoading ? <><RotateCcw className="spin" size={17}/> Génération + sync…</> : <><Sparkles size={17}/> Générer et synchroniser</>}</button>
               </>}
-              {script && <div className={`auto-script-result word-sync-result ${alignmentMode === 'exact_api_timestamps' ? 'exact' : ''}`} dir={alphabet === 'arabic' ? 'rtl' : 'ltr'}><div><span><CheckCircle2 size={15}/> {alignmentMode === 'exact_api_timestamps' ? 'Timestamps exacts API' : alignmentMode === 'ai_transcribed_timestamps' ? 'Captions générées depuis la voix' : 'Synchronisation estimée'}</span><small>{script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots · {script.captions.length} scènes</small></div><div className="word-timing-preview">{script.captions.flatMap((caption) => caption.words ?? []).slice(0, 18).map((word, index) => <span key={`${word.start}-${index}`}><b>{word.word}</b><small>{word.start.toFixed(2)}s</small></span>)}</div><button onClick={() => setStep(3)}>Ajouter les vidéos <ArrowRight size={15}/></button></div>}
+              {script && <div className="caption-format-card"><div className="caption-format-title"><div><Type size={16}/><span><strong>Affichage des captions</strong><small>Le rythme des captions ne change pas le rythme des plans vidéo.</small></span></div><b>{formattedCaptions.length} captions</b></div><div className="caption-control-row"><label>Mots affichés</label><div className="caption-word-buttons">{([1, 2, 3] as const).map((count) => <button key={count} className={captionGroupSize === count ? 'active' : ''} onClick={() => { setCaptionGroupSize(count); setProject(null); }}>{count} mot{count > 1 ? 's' : ''}</button>)}<button className={captionGroupSize === 'auto' ? 'active' : ''} onClick={() => { setCaptionGroupSize('auto'); setProject(null); }}>Auto</button><label className={typeof captionGroupSize === 'number' && captionGroupSize > 3 ? 'active' : ''}>Perso <input type="number" min="1" max="10" value={typeof captionGroupSize === 'number' ? captionGroupSize : 4} onChange={(event) => { setCaptionGroupSize(Math.max(1, Math.min(10, Number(event.target.value) || 1))); setProject(null); }}/></label></div></div><div className="caption-control-row"><label>Taille <b>{captionFontSize}px</b></label><div className="caption-size-controls"><button className={captionFontSize === 28 ? 'active' : ''} onClick={() => { setCaptionFontSize(28); setProject(null); }}>Petite</button><button className={captionFontSize === 36 ? 'active' : ''} onClick={() => { setCaptionFontSize(36); setProject(null); }}>Normale</button><button className={captionFontSize === 48 ? 'active' : ''} onClick={() => { setCaptionFontSize(48); setProject(null); }}>Grande</button><input type="range" min="20" max="72" value={captionFontSize} onChange={(event) => { setCaptionFontSize(Number(event.target.value)); setProject(null); }}/></div></div><div className="caption-control-row compact"><label>Position <b>{captionPosition}%</b></label><input type="range" min="20" max="90" value={captionPosition} onChange={(event) => { setCaptionPosition(Number(event.target.value)); setProject(null); }}/><button className={`caption-case-toggle ${captionUppercase ? 'active' : ''}`} onClick={() => { setCaptionUppercase((value) => !value); setProject(null); }}>AA</button></div><div className="caption-live-sample" dir={alphabet === 'arabic' ? 'rtl' : 'ltr'} style={{ fontFamily: `${getCaptionFont(captionFont).family}, sans-serif`, fontSize: `${Math.max(13, captionFontSize * .45)}px` }}>{captionUppercase ? captionPreviewText.toUpperCase() : captionPreviewText}</div></div>}
+              {script && <div className={`auto-script-result word-sync-result ${alignmentMode === 'exact_api_timestamps' ? 'exact' : ''}`} dir={alphabet === 'arabic' ? 'rtl' : 'ltr'}><div><span><CheckCircle2 size={15}/> {alignmentMode === 'exact_api_timestamps' ? 'Timestamps exacts API' : alignmentMode === 'ai_transcribed_timestamps' ? 'Captions générées depuis la voix' : 'Synchronisation estimée'}</span><small>{script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots · {formattedCaptions.length} captions</small></div><div className="word-timing-preview">{script.captions.flatMap((caption) => caption.words ?? []).slice(0, 18).map((word, index) => <span key={`${word.start}-${index}`}><b>{word.word}</b><small>{word.start.toFixed(2)}s</small></span>)}</div><button onClick={() => setStep(3)}>Ajouter les vidéos <ArrowRight size={15}/></button></div>}
               <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(1)}><ArrowLeft size={15}/> Retour à la voix</button></div>
             </div>}
 
@@ -1312,7 +1369,7 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
               </div>
               <div className="font-library-head"><div><Type size={15}/><span><strong>Police des captions</strong><small>Indépendante du thème · {CAPTION_FONTS.length} fonts self-hosted</small></span></div><div className="font-language-filter"><button className={fontLanguage === 'all' ? 'active' : ''} onClick={() => setFontLanguage('all')}>Toutes</button><button className={fontLanguage === 'arabic' ? 'active' : ''} onClick={() => setFontLanguage('arabic')}>Arabe</button><button className={fontLanguage === 'latin' ? 'active' : ''} onClick={() => setFontLanguage('latin')}>Latin/FR</button></div></div>
               <div className="caption-font-grid">{CAPTION_FONTS.filter((font) => fontLanguage === 'all' || font.group === fontLanguage).map((font) => <button key={font.id} className={captionFont === font.id ? 'active' : ''} onClick={() => { setCaptionFont(font.id); setProject(null); }}><b dir={font.group === 'arabic' ? 'rtl' : 'ltr'} style={{ fontFamily: `${font.family}, sans-serif`, fontWeight: font.weight }}>{font.sample}</b><span>{font.name}</span>{captionFont === font.id && <i><Check size={10}/></i>}</button>)}</div>
-              <div className="auto-summary"><div><FileText size={16}/><span><strong>{script ? `${script.captions.length} scènes · ${script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots` : 'Script manquant'}</strong><small>{alignmentMode === 'exact_api_timestamps' ? 'Timing exact API' : alignmentMode === 'ai_transcribed_timestamps' ? 'Transcrit depuis la voix' : 'Timing estimé'}</small></span></div><div><Mic2 size={16}/><span><strong>{voiceAsset ? 'Voix synchronisée' : 'Voix manquante'}</strong><small>{voiceAsset?.name ?? 'Requis'}</small></span></div><div><Clapperboard size={16}/><span><strong>{visualAssets.length} médias</strong><small>Montage automatique</small></span></div></div>
+              <div className="auto-summary"><div><FileText size={16}/><span><strong>{script ? `${formattedCaptions.length} captions · ${createMontageScenes(script.captions).length} plans` : 'Script manquant'}</strong><small>{alignmentMode === 'exact_api_timestamps' ? 'Timing exact API' : alignmentMode === 'ai_transcribed_timestamps' ? 'Transcrit depuis la voix' : 'Timing estimé'}</small></span></div><div><Mic2 size={16}/><span><strong>{voiceAsset ? 'Voix synchronisée' : 'Voix manquante'}</strong><small>{voiceAsset?.name ?? 'Requis'}</small></span></div><div><Clapperboard size={16}/><span><strong>{visualAssets.length} médias</strong><small>Montage automatique</small></span></div></div>
               {!project ? <button className="auto-generate-video" onClick={assembleProject} disabled={!script || !voiceAsset || !visualAssets.length || assembling}>{assembling ? <><RotateCcw className="spin" size={18}/> Construction {assemblyProgress}%</> : <><Rocket size={18}/> Construire ma vidéo</>}</button> : <div className="auto-ready-actions"><div><CheckCircle2 size={21}/><span><strong>Ton montage est prêt</strong><small>Tu peux l’exporter directement ou modifier chaque détail.</small></span></div><button onClick={exportProject} disabled={rendering}><Download size={16}/>{rendering ? 'Rendu en cours…' : 'Exporter MP4'}</button><button onClick={onOpenAdvanced}><SlidersHorizontal size={16}/> Affiner le montage</button></div>}
               <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(3)}><ArrowLeft size={15}/> Retour</button></div>
             </div>}
@@ -1320,7 +1377,7 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
 
           <aside className="auto-preview-card">
             <div className="auto-preview-head"><span><MonitorPlay size={14}/> Aperçu</span><small>9:16 · {duration}s</small></div>
-            <div className="auto-phone-preview">{firstVisual?.url ? (firstVisual.kind === 'image' ? <img src={firstVisual.url} alt=""/> : <video src={firstVisual.url} muted autoPlay loop playsInline/>) : <div className="auto-preview-empty"><Smartphone size={30}/><span>Ton aperçu apparaîtra ici</span></div>}<div className={`auto-caption-demo preset-${selectedAutoStyle.captionStyle.preset ?? 'impact'}`} style={{ color: selectedAutoStyle.captionStyle.textColor, background: selectedAutoStyle.captionStyle.preset === 'box' ? selectedAutoStyle.captionStyle.backgroundColor : undefined, textDecorationColor: selectedAutoStyle.captionStyle.accentColor, fontFamily: `${getCaptionFont(captionFont).family}, sans-serif` }}>{script ? (alphabet === 'arabic' ? script.captions[0]?.textAr ?? script.captions[0]?.text : script.captions[0]?.text) : 'CAPTIONS DARIJA'}</div><i className="auto-phone-progress"/></div>
+            <div className="auto-phone-preview">{firstVisual?.url ? (firstVisual.kind === 'image' ? <img src={firstVisual.url} alt=""/> : <video src={firstVisual.url} muted autoPlay loop playsInline/>) : <div className="auto-preview-empty"><Smartphone size={30}/><span>Ton aperçu apparaîtra ici</span></div>}<div className={`auto-caption-demo preset-${selectedAutoStyle.captionStyle.preset ?? 'impact'}`} style={{ color: selectedAutoStyle.captionStyle.textColor, background: selectedAutoStyle.captionStyle.preset === 'box' ? selectedAutoStyle.captionStyle.backgroundColor : undefined, textDecorationColor: selectedAutoStyle.captionStyle.accentColor, fontFamily: `${getCaptionFont(captionFont).family}, sans-serif`, fontSize: `${Math.max(8, captionFontSize * .32)}px`, top: `${captionPosition}%`, bottom: 'auto', transform: 'translateY(-50%)', textTransform: captionUppercase ? 'uppercase' : 'none' }}>{script ? (captionUppercase ? captionPreviewText.toUpperCase() : captionPreviewText) : 'CAPTIONS DARIJA'}</div><i className="auto-phone-progress"/></div>
             <div className="auto-preview-stats"><span><Sparkles size={13}/> Auto captions</span><span><Clapperboard size={13}/> Auto cuts</span></div>
           </aside>
         </section>
