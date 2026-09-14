@@ -1017,9 +1017,11 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
   const [alphabet, setAlphabet] = useState<'latin' | 'arabic' | 'french'>('latin');
   const [script, setScript] = useState<AutoScriptResult | null>(null);
   const [manualScript, setManualScript] = useState('');
-  const [scriptSource, setScriptSource] = useState<'paste' | 'generate'>('paste');
+  const [scriptSource, setScriptSource] = useState<'voice' | 'paste' | 'generate'>('voice');
   const [scriptLoading, setScriptLoading] = useState(false);
-  const [alignmentMode, setAlignmentMode] = useState<'exact_api_timestamps' | 'estimated_local' | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState<'auto' | 'ar' | 'fr'>('auto');
+  const [alignmentMode, setAlignmentMode] = useState<'exact_api_timestamps' | 'ai_transcribed_timestamps' | 'estimated_local' | null>(null);
   const [apiWordTimings, setApiWordTimings] = useState<WordTiming[]>([]);
   const [visualAssets, setVisualAssets] = useState<MediaAsset[]>([]);
   const [voiceAsset, setVoiceAsset] = useState<MediaAsset | null>(null);
@@ -1072,9 +1074,13 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
     setMessage('Import de la voix off…');
     const uploaded = await uploadOne(file, 5);
     setVoiceAsset(uploaded);
-    if (uploaded.duration) setDuration(Number(Math.min(90, uploaded.duration).toFixed(2)));
+    setScript(null);
+    setManualScript('');
+    setAlignmentMode(null);
+    if (uploaded.duration) setDuration(Number(Math.min(600, uploaded.duration).toFixed(2)));
     setUploading(false);
-    setMessage('Voix off prête.');
+    setMessage('Voix off prête. Génération automatique du script…');
+    await transcribeVoice(uploaded);
   };
 
   const loadWordTimestamps = async (file?: File) => {
@@ -1088,6 +1094,30 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
     } catch {
       setApiWordTimings([]);
       setMessage('JSON invalide. Format attendu : [{ word, start, end }].');
+    }
+  };
+
+  const transcribeVoice = async (asset: MediaAsset | null = voiceAsset) => {
+    if (!asset?.storageId) { setMessage('La voix doit finir son upload serveur avant la transcription.'); return; }
+    setTranscribing(true);
+    setScriptSource('voice');
+    setMessage('Whisper écoute la voix et génère les captions mot par mot… Le premier lancement peut télécharger le modèle local.');
+    try {
+      const response = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storageId: asset.storageId, duration: asset.duration ?? duration, language: transcriptionLanguage }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Transcription impossible');
+      setScript({ script: data.script, scriptAr: data.scriptAr ?? data.script, captions: data.captions, engine: data.engine });
+      setManualScript(data.script);
+      setAlignmentMode('ai_transcribed_timestamps');
+      if (data.language === 'ar') setAlphabet('arabic');
+      if (data.language === 'fr') setAlphabet('french');
+      setMessage(`${data.wordCount} mots et ${data.captions.length} captions générés directement depuis la voix.`);
+    } catch (error) {
+      setScript(null);
+      setAlignmentMode(null);
+      setMessage(error instanceof Error ? error.message : 'Transcription impossible');
+    } finally {
+      setTranscribing(false);
     }
   };
 
@@ -1210,7 +1240,7 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
   };
 
   const steps = [
-    { id: 1, label: 'Voix off', hint: 'Audio + timestamps', icon: Mic2, done: Boolean(voiceAsset) },
+    { id: 1, label: 'Voix off', hint: 'Audio → captions', icon: Mic2, done: Boolean(voiceAsset && script) },
     { id: 2, label: 'Script & sync', hint: 'Chaque mot', icon: FileText, done: Boolean(script) },
     { id: 3, label: 'Vidéos', hint: 'Plans à choisir', icon: Clapperboard, done: visualAssets.length > 0 },
     { id: 4, label: 'Style & montage', hint: 'IA automatique', icon: Palette, done: Boolean(project) },
@@ -1227,7 +1257,7 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
       </header>
 
       <main className="auto-main">
-        <section className="auto-intro"><span className="auto-kicker"><Rocket size={13} /> Voice-first · captions mot par mot</span><h1>Men la voix l vidéo.<br/><em>Kolchi synchronisé.</em></h1><p>Ajoute ta voix off et ton script. Le moteur aligne chaque mot, choisit les bons plans et termine le montage.</p></section>
+        <section className="auto-intro"><span className="auto-kicker"><Rocket size={13} /> Voice-first · captions mot par mot</span><h1>Men la voix l vidéo.<br/><em>Kolchi synchronisé.</em></h1><p>Ajoute seulement ta voix off : Whisper génère le script et les captions mot par mot, puis le moteur choisit les bons plans et termine le montage.</p></section>
 
         <nav className="auto-steps" aria-label="Étapes de création">
           {steps.map(({ id, label, hint, icon: Icon, done }, index) => <button key={id} className={`${step === id ? 'active' : ''} ${done ? 'done' : ''}`} onClick={() => setStep(id)}><i>{done ? <Check size={15} /> : <Icon size={16} />}</i><span><strong>{label}</strong><small>{hint}</small></span>{index < steps.length - 1 && <ChevronStep />}</button>)}
@@ -1236,27 +1266,29 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
         <section className="auto-workspace">
           <div className="auto-panel">
             {step === 1 && <div className="auto-step-content voice-first-step">
-              <div className="auto-section-title"><span>01</span><div><h2>Commence par la voix off</h2><p>La durée de l’audio devient automatiquement la durée du montage.</p></div></div>
+              <div className="auto-section-title"><span>01</span><div><h2>Importe la voix, le script se génère</h2><p>Whisper écoute l’audio et crée automatiquement le texte, les captions et les timestamps mot par mot.</p></div></div>
               {!voiceAsset ? <button className="auto-upload-zone voice-zone" onClick={() => voiceInputRef.current?.click()}><i><Mic2 size={25}/></i><strong>Importer la voix off</strong><span>MP3, WAV, M4A ou AAC</span></button> : <div className="voice-ready"><i><Volume2 size={22}/></i><div><strong>{voiceAsset.name}</strong><span>{voiceAsset.duration ? `${voiceAsset.duration.toFixed(2)} secondes détectées` : 'Audio prêt'}</span></div><audio controls src={voiceAsset.url}/><button onClick={() => { setVoiceAsset(null); setScript(null); setAlignmentMode(null); }}><Trash2 size={15}/></button></div>}
               <input ref={voiceInputRef} type="file" hidden accept="audio/*" onChange={(event) => { void addVoiceFile(event.target.files?.[0]); event.target.value = ''; }}/>
-              {voiceAsset && <div className="timestamps-card"><div><i><Sparkles size={17}/></i><span><strong>Tu as les timestamps de ton API voix ?</strong><small>Importe le JSON mot par mot pour une synchronisation exacte.</small></span></div><button onClick={() => timestampsInputRef.current?.click()}>{apiWordTimings.length ? <><Check size={14}/> {apiWordTimings.length} mots chargés</> : <><UploadCloud size={14}/> Importer JSON</>}</button><input ref={timestampsInputRef} type="file" hidden accept=".json,application/json" onChange={(event) => { void loadWordTimestamps(event.target.files?.[0]); event.target.value = ''; }}/></div>}
-              <div className="alignment-explainer"><span className={apiWordTimings.length ? 'exact' : ''}>{apiWordTimings.length ? 'Mode exact API' : 'Mode estimé disponible'}</span><p>{apiWordTimings.length ? 'Chaque mot utilisera le start/end fourni par la génération de voix.' : 'Sans JSON, le moteur répartit les mots selon la durée. Pour du vrai mot-à-mot exact, utilise les timestamps de ta plateforme voix.'}</p></div>
-              <div className="auto-step-actions"><button className="auto-primary compact" disabled={!voiceAsset || uploading} onClick={() => setStep(2)}>Ajouter le script <ArrowRight size={15}/></button></div>
+              {voiceAsset && <div className={`voice-transcription-card ${script ? 'ready' : ''}`}><div><i>{transcribing ? <RotateCcw className="spin" size={18}/> : script ? <CheckCircle2 size={18}/> : <Sparkles size={18}/>}</i><span><strong>{transcribing ? 'Génération du script en cours…' : script ? 'Script et captions générés' : 'Générer depuis cette voix'}</strong><small>{transcribing ? 'Analyse locale Whisper · attends la fin du traitement' : script ? `${script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots · ${script.captions.length} captions synchronisées` : 'Transcription Darija, arabe ou français'}</small></span></div><label>Langue<select value={transcriptionLanguage} disabled={transcribing} onChange={(event) => setTranscriptionLanguage(event.target.value as typeof transcriptionLanguage)}><option value="auto">Détection automatique</option><option value="ar">Darija / Arabe</option><option value="fr">Français</option></select></label><button disabled={transcribing || uploading} onClick={() => void transcribeVoice()}>{transcribing ? 'Transcription…' : script ? 'Retranscrire' : 'Transcrire la voix'}</button></div>}
+              {voiceAsset && <details className="timestamps-optional"><summary>Option avancée : importer le script/timestamps de ta plateforme</summary><div className="timestamps-card"><div><i><Sparkles size={17}/></i><span><strong>Timestamps API disponibles ?</strong><small>Ils restent prioritaires pour une synchronisation authoritative.</small></span></div><button onClick={() => timestampsInputRef.current?.click()}>{apiWordTimings.length ? <><Check size={14}/> {apiWordTimings.length} mots chargés</> : <><UploadCloud size={14}/> Importer JSON</>}</button><input ref={timestampsInputRef} type="file" hidden accept=".json,application/json" onChange={(event) => { void loadWordTimestamps(event.target.files?.[0]); event.target.value = ''; }}/></div></details>}
+              <div className="alignment-explainer"><span className={alignmentMode === 'exact_api_timestamps' ? 'exact' : script ? 'ai' : ''}>{alignmentMode === 'exact_api_timestamps' ? 'Timestamps exacts API' : alignmentMode === 'ai_transcribed_timestamps' ? 'Captions générées par Whisper' : transcribing ? 'Whisper travaille…' : 'En attente de la voix'}</span><p>{alignmentMode === 'ai_transcribed_timestamps' ? 'Le texte et le minutage ont été détectés directement dans l’audio. Vérifie-les à l’étape suivante avant le montage.' : 'Après l’upload, la transcription démarre automatiquement. Tu peux aussi la relancer avec une langue imposée.'}</p></div>
+              <div className="auto-step-actions"><button className="auto-primary compact" disabled={!script || transcribing || uploading} onClick={() => setStep(2)}>Vérifier les captions <ArrowRight size={15}/></button></div>
             </div>}
 
             {step === 2 && <div className="auto-step-content script-sync-step">
-              <div className="auto-section-title"><span>02</span><div><h2>Script et synchronisation mot par mot</h2><p>Colle ton script existant ou laisse le générateur l’écrire.</p></div></div>
-              <div className="script-source-switch"><button className={scriptSource === 'paste' ? 'active' : ''} onClick={() => setScriptSource('paste')}><FileText size={14}/> Coller mon script</button><button className={scriptSource === 'generate' ? 'active' : ''} onClick={() => setScriptSource('generate')}><Sparkles size={14}/> Générer un script</button></div>
-              {scriptSource === 'paste' ? <>
-                <label className="auto-topic script-paste"><textarea value={manualScript} onChange={(event) => { setManualScript(event.target.value); setScript(null); }} placeholder="Colle ici exactement le script utilisé pour générer la voix off…" maxLength={12000}/><small>{manualScript.trim().split(/\s+/).filter(Boolean).length} mots</small></label>
+              <div className="auto-section-title"><span>02</span><div><h2>Vérifie le script généré depuis la voix</h2><p>Les captions viennent déjà de l’audio. Corrige seulement un mot si Whisper s’est trompé.</p></div></div>
+              <div className="script-source-switch three"><button className={scriptSource === 'voice' ? 'active' : ''} onClick={() => setScriptSource('voice')}><Mic2 size={14}/> Depuis la voix</button><button className={scriptSource === 'paste' ? 'active' : ''} onClick={() => setScriptSource('paste')}><FileText size={14}/> Importer texte</button><button className={scriptSource === 'generate' ? 'active' : ''} onClick={() => setScriptSource('generate')}><Sparkles size={14}/> Écrire autre script</button></div>
+              {scriptSource !== 'generate' ? <>
+                {scriptSource === 'voice' && <div className="caption-origin"><Mic2 size={16}/><span><strong>Transcrit depuis {voiceAsset?.name}</strong><small>Le texte ci-dessous a été entendu dans la voix, il n’a pas été inventé.</small></span><button disabled={transcribing} onClick={() => void transcribeVoice()}>{transcribing ? 'Écoute…' : 'Relancer'}</button></div>}
+                <label className="auto-topic script-paste"><textarea value={manualScript} onChange={(event) => { setManualScript(event.target.value); setScript(null); setAlignmentMode(null); }} placeholder={scriptSource === 'voice' ? 'Le script entendu dans la voix apparaîtra ici…' : 'Colle ici exactement le script utilisé pour générer la voix off…'} maxLength={12000}/><small>{manualScript.trim().split(/\s+/).filter(Boolean).length} mots</small></label>
                 <div className="auto-options sync-options"><label>Écriture<select value={alphabet} onChange={(event) => setAlphabet(event.target.value as typeof alphabet)}><option value="latin">Darija latin</option><option value="arabic">Arabe / العربية</option><option value="french">Français</option></select></label><label>Durée détectée<div className="detected-duration">{(voiceAsset?.duration ?? duration).toFixed(2)} secondes</div></label></div>
-                <button className="auto-primary" onClick={synchronizeManualScript} disabled={scriptLoading || !voiceAsset || manualScript.trim().length < 2}>{scriptLoading ? <><RotateCcw className="spin" size={17}/> Synchronisation…</> : <><Sparkles size={17}/> Synchroniser chaque mot</>}</button>
+                <button className="auto-primary" onClick={synchronizeManualScript} disabled={scriptLoading || transcribing || !voiceAsset || manualScript.trim().length < 2}>{scriptLoading ? <><RotateCcw className="spin" size={17}/> Mise à jour…</> : <><Sparkles size={17}/> {scriptSource === 'voice' ? 'Mettre à jour les captions' : 'Synchroniser le texte importé'}</>}</button>
               </> : <>
                 <label className="auto-topic"><textarea value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Exemple : présenter ma nouvelle application de livraison…" maxLength={120}/><small>{topic.length}/120</small></label>
                 <div className="auto-options"><label>Ton<select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)}><option value="energetic">Énergique</option><option value="educational">Éducatif</option><option value="sales">Commercial</option><option value="story">Storytelling</option></select></label><label>Durée<div className="detected-duration">{(voiceAsset?.duration ?? duration).toFixed(2)}s</div></label><label>Écriture<select value={alphabet} onChange={(event) => setAlphabet(event.target.value as typeof alphabet)}><option value="latin">Darija latin</option><option value="arabic">دارجة عربية</option></select></label></div>
                 <button className="auto-primary" onClick={generateScript} disabled={scriptLoading || !voiceAsset || topic.trim().length < 3}>{scriptLoading ? <><RotateCcw className="spin" size={17}/> Génération + sync…</> : <><Sparkles size={17}/> Générer et synchroniser</>}</button>
               </>}
-              {script && <div className={`auto-script-result word-sync-result ${alignmentMode === 'exact_api_timestamps' ? 'exact' : ''}`} dir={alphabet === 'arabic' ? 'rtl' : 'ltr'}><div><span><CheckCircle2 size={15}/> {alignmentMode === 'exact_api_timestamps' ? 'Synchronisation exacte' : 'Synchronisation estimée'}</span><small>{script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots · {script.captions.length} scènes</small></div><div className="word-timing-preview">{script.captions.flatMap((caption) => caption.words ?? []).slice(0, 18).map((word, index) => <span key={`${word.start}-${index}`}><b>{word.word}</b><small>{word.start.toFixed(2)}s</small></span>)}</div><button onClick={() => setStep(3)}>Ajouter les vidéos <ArrowRight size={15}/></button></div>}
+              {script && <div className={`auto-script-result word-sync-result ${alignmentMode === 'exact_api_timestamps' ? 'exact' : ''}`} dir={alphabet === 'arabic' ? 'rtl' : 'ltr'}><div><span><CheckCircle2 size={15}/> {alignmentMode === 'exact_api_timestamps' ? 'Timestamps exacts API' : alignmentMode === 'ai_transcribed_timestamps' ? 'Captions générées depuis la voix' : 'Synchronisation estimée'}</span><small>{script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots · {script.captions.length} scènes</small></div><div className="word-timing-preview">{script.captions.flatMap((caption) => caption.words ?? []).slice(0, 18).map((word, index) => <span key={`${word.start}-${index}`}><b>{word.word}</b><small>{word.start.toFixed(2)}s</small></span>)}</div><button onClick={() => setStep(3)}>Ajouter les vidéos <ArrowRight size={15}/></button></div>}
               <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(1)}><ArrowLeft size={15}/> Retour à la voix</button></div>
             </div>}
 
@@ -1275,7 +1307,7 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
               <div className="auto-template-grid expanded style-library">
                 {AUTO_STYLES.filter((style) => styleLanguage === 'all' || style.group === styleLanguage).map((style) => <button key={style.id} className={`auto-style-card ${template === style.id ? 'active' : ''}`} onClick={() => { setTemplate(style.id); setProject(null); }}><div dir={style.group === 'arabic' ? 'rtl' : 'ltr'} style={{ background: style.previewBackground, color: style.previewColor }}><strong>{style.sample}</strong><span>{style.name}</span></div><small>{style.subtitle}</small>{template === style.id && <i><Check size={12}/></i>}</button>)}
               </div>
-              <div className="auto-summary"><div><FileText size={16}/><span><strong>{script ? `${script.captions.length} scènes · ${script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots` : 'Script manquant'}</strong><small>{alignmentMode === 'exact_api_timestamps' ? 'Timing exact API' : 'Timing estimé'}</small></span></div><div><Mic2 size={16}/><span><strong>{voiceAsset ? 'Voix synchronisée' : 'Voix manquante'}</strong><small>{voiceAsset?.name ?? 'Requis'}</small></span></div><div><Clapperboard size={16}/><span><strong>{visualAssets.length} médias</strong><small>Montage automatique</small></span></div></div>
+              <div className="auto-summary"><div><FileText size={16}/><span><strong>{script ? `${script.captions.length} scènes · ${script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots` : 'Script manquant'}</strong><small>{alignmentMode === 'exact_api_timestamps' ? 'Timing exact API' : alignmentMode === 'ai_transcribed_timestamps' ? 'Transcrit depuis la voix' : 'Timing estimé'}</small></span></div><div><Mic2 size={16}/><span><strong>{voiceAsset ? 'Voix synchronisée' : 'Voix manquante'}</strong><small>{voiceAsset?.name ?? 'Requis'}</small></span></div><div><Clapperboard size={16}/><span><strong>{visualAssets.length} médias</strong><small>Montage automatique</small></span></div></div>
               {!project ? <button className="auto-generate-video" onClick={assembleProject} disabled={!script || !voiceAsset || !visualAssets.length || assembling}>{assembling ? <><RotateCcw className="spin" size={18}/> Construction {assemblyProgress}%</> : <><Rocket size={18}/> Construire ma vidéo</>}</button> : <div className="auto-ready-actions"><div><CheckCircle2 size={21}/><span><strong>Ton montage est prêt</strong><small>Tu peux l’exporter directement ou modifier chaque détail.</small></span></div><button onClick={exportProject} disabled={rendering}><Download size={16}/>{rendering ? 'Rendu en cours…' : 'Exporter MP4'}</button><button onClick={onOpenAdvanced}><SlidersHorizontal size={16}/> Affiner le montage</button></div>}
               <div className="auto-step-actions"><button className="auto-secondary" onClick={() => setStep(3)}><ArrowLeft size={15}/> Retour</button></div>
             </div>}

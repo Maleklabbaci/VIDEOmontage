@@ -11,9 +11,10 @@ npm run dev
 
 ## Fonctionnalités actives
 
-- workflow voice-first : voix off → script → synchronisation mot par mot → vidéos → styles → montage ;
-- import optionnel des timestamps exacts `{ word, start, end }` fournis par l’API voix ;
-- alignement local estimé lorsque les timestamps exacts ne sont pas disponibles ;
+- workflow voice-first : upload voix off → transcription automatique → script/captions mot par mot → vidéos → styles → montage ;
+- transcription locale de la voix en Darija/arabe/français avec Whisper ONNX open source ;
+- import optionnel des scripts/timestamps exacts `{ word, start, end }` fournis par la plateforme voix ;
+- correction manuelle du texte transcrit et réalignement disponible ;
 - captions karaoke mot par mot dans la preview et l’export FFmpeg/ASS ;
 - planificateur sémantique qui associe chaque scène aux noms/descriptions des médias ;
 - 24 styles complets : 8 Darija, 8 arabes et 8 français ;
@@ -56,7 +57,16 @@ npm run dev
 - `POST /api/render` : composition et téléchargement du MP4 ;
 - `POST /api/script` : génération locale du script darija ;
 - `POST /api/align` : alignement mot par mot exact ou estimé ;
+- `POST /api/transcribe` : génération locale du script, des captions et timestamps depuis la voix ;
 - `POST /api/plan` : sélection sémantique des plans pour chaque scène.
+
+Le modèle par défaut est `onnx-community/whisper-tiny_timestamped`. Pour une qualité Darija supérieure sur un serveur plus puissant :
+
+```bash
+DARJA_WHISPER_MODEL=onnx-community/whisper-small_timestamped npm run dev
+```
+
+Le modèle est téléchargé au premier usage puis conservé dans le cache local. `DARJA_WHISPER_CACHE` permet de choisir un répertoire de modèles persistant.
 
 ## À renforcer avant production
 
