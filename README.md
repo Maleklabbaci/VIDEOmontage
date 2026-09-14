@@ -1,6 +1,6 @@
 # Darja Video Studio
 
-Prototype autonome d'un éditeur vidéo web en darija, construit avec Next.js et React.
+Éditeur vidéo web autonome en darija, construit avec Next.js, React et un moteur FFmpeg self-hosted.
 
 ## Démarrage
 
@@ -9,26 +9,44 @@ npm install
 npm run dev
 ```
 
-## Déjà présent
+## Fonctionnalités actives
 
-- médiathèque avec import local vidéo/image/audio ;
-- aperçu vertical et lecture synchronisée ;
-- captions darija basées sur des timestamps ;
-- styles, couleurs, position, ombre et presets ;
+- import local puis stockage self-hosted des vidéos, images et pistes audio ;
+- preview 9:16 composée depuis les clips réellement actifs sur la timeline ;
+- synchronisation du temps global, des trims et des médias ;
 - véritable timeline multipiste interactive ;
 - sélection, déplacement horizontal et déplacement entre pistes compatibles ;
-- trim gauche/droite, split, duplication et suppression ;
+- trim non destructif avec `sourceStart`, split, duplication et suppression ;
 - snapping magnétique, zoom, verrouillage et ajout de pistes ;
-- raccourcis clavier : espace, S, Suppr, Ctrl/Cmd+D et Ctrl/Cmd+Z ;
-- ajout d’un média à la timeline par double-clic ;
-- panneaux modèles, transitions et effets ;
-- historique undo/redo de la timeline et des styles ;
-- contrat API initial pour les jobs de rendu.
+- raccourcis : espace, S, Suppr, Ctrl/Cmd+D et Ctrl/Cmd+Z ;
+- captions darija latin/arabe synchronisées par timestamps ;
+- textes libres ajoutés à une vraie piste ;
+- transitions preview : fade, slide, zoom, flash, rotation et wipe ;
+- transformation des clips : X, Y, échelle, rotation, opacité et crop ;
+- keyframes interpolés dans la preview et rendus pour X, Y, échelle et rotation ;
+- effets : enhance, grain, glow et motion blur ;
+- panneaux Médias, Modèles, Texte, Captions, Audio, Transitions et Effets reliés à l’état du projet ;
+- inspecteur contextuel vidéo/image, texte, audio ou captions ;
+- upload avec lecture HTTP Range ;
+- export MP4 réel en H.264 1080×1920, audio AAC et captions intégrées ;
+- moteur FFmpeg isolé et entièrement self-hosted.
 
-## Prochaine couche de production
+## API
 
-- stockage objet (S3/R2) et base PostgreSQL ;
-- worker FFmpeg/WebCodecs isolé et entièrement self-hosted ;
-- waveform audio et vraie timeline de clips ;
-- autosave, comptes, collaboration et file de jobs ;
-- export MP4 H.264/H.265 et suivi de progression.
+- `POST /api/assets` : stockage d’un média ;
+- `GET /api/assets/:filename` : lecture avec support Range ;
+- `POST /api/render` : composition et téléchargement du MP4.
+
+## À renforcer avant production
+
+- jobs de rendu asynchrones avec Redis/BullMQ et progression ;
+- stockage objet S3/R2/MinIO au lieu du disque local ;
+- accélération WebCodecs côté navigateur et proxies basse résolution ;
+- autosave PostgreSQL, comptes, permissions et collaboration ;
+- keyframes d’opacité parfaitement identiques entre preview et FFmpeg ;
+- rendu exact des transitions masque/flash et des textes libres ;
+- tests E2E sur les grands projets et limites par utilisateur.
+
+## Licence et déploiement
+
+La pile d’édition reste sous notre contrôle. Le binaire `ffmpeg-static` utilisé ici est une build GPL incluant `libx264`. Pour une distribution commerciale, il faudra valider la stratégie de licence/codecs et éventuellement utiliser une build FFmpeg adaptée à l’infrastructure finale.

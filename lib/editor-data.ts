@@ -36,11 +36,21 @@ export type MediaAsset = {
   name: string;
   kind: 'video' | 'image' | 'audio';
   url?: string;
+  storageId?: string;
   color: string;
   duration?: number;
 };
 
 export type TimelineClipKind = 'video' | 'image' | 'audio' | 'caption' | 'text';
+export type TransitionType = 'none' | 'fade' | 'slide' | 'zoom' | 'flash' | 'rotate' | 'wipe';
+export type KeyframeProperty = 'x' | 'y' | 'scale' | 'rotation' | 'opacity';
+
+export type TimelineKeyframe = {
+  id: string;
+  time: number;
+  property: KeyframeProperty;
+  value: number;
+};
 
 export type TimelineClip = {
   id: string;
@@ -53,6 +63,20 @@ export type TimelineClip = {
   sourceStart: number;
   color: string;
   text?: string;
+  x?: number;
+  y?: number;
+  scale?: number;
+  rotation?: number;
+  opacity?: number;
+  volume?: number;
+  cropTop?: number;
+  cropRight?: number;
+  cropBottom?: number;
+  cropLeft?: number;
+  transitionIn?: TransitionType;
+  transitionDuration?: number;
+  effect?: 'none' | 'enhance' | 'grain' | 'glow' | 'motionBlur';
+  keyframes?: TimelineKeyframe[];
 };
 
 export type TimelineTrack = {
@@ -100,9 +124,9 @@ export const initialTimelineTracks: TimelineTrack[] = [
     locked: false,
     muted: false,
     clips: [
-      { id: 'clip-intro', trackId: 'video-main', assetId: 'm1', kind: 'video', name: 'Intro produit', start: 0, duration: 8.2, sourceStart: 0, color: '#d65b35' },
-      { id: 'clip-life', trackId: 'video-main', assetId: 'm2', kind: 'video', name: 'Plan lifestyle', start: 8.2, duration: 12.4, sourceStart: 0, color: '#6658d8' },
-      { id: 'clip-phone', trackId: 'video-main', assetId: 'm3', kind: 'video', name: 'B-roll téléphone', start: 20.6, duration: 9.8, sourceStart: 0, color: '#269c79' },
+      { id: 'clip-intro', trackId: 'video-main', assetId: 'm1', kind: 'video', name: 'Intro produit', start: 0, duration: 8.2, sourceStart: 0, color: '#d65b35', x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, transitionIn: 'fade', transitionDuration: .45 },
+      { id: 'clip-life', trackId: 'video-main', assetId: 'm2', kind: 'video', name: 'Plan lifestyle', start: 8.2, duration: 12.4, sourceStart: 0, color: '#6658d8', x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, transitionIn: 'slide', transitionDuration: .5 },
+      { id: 'clip-phone', trackId: 'video-main', assetId: 'm3', kind: 'video', name: 'B-roll téléphone', start: 20.6, duration: 9.8, sourceStart: 0, color: '#269c79', x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, transitionIn: 'zoom', transitionDuration: .5 },
     ],
   },
   {
@@ -112,7 +136,7 @@ export const initialTimelineTracks: TimelineTrack[] = [
     locked: false,
     muted: false,
     clips: [
-      { id: 'clip-overlay', trackId: 'video-overlay', kind: 'video', name: 'Overlay produit', start: 4.6, duration: 5.4, sourceStart: 0, color: '#b94c83' },
+      { id: 'clip-overlay', trackId: 'video-overlay', kind: 'video', name: 'Overlay produit', start: 4.6, duration: 5.4, sourceStart: 0, color: '#b94c83', x: 23, y: -16, scale: .42, rotation: 4, opacity: .95, transitionIn: 'zoom', transitionDuration: .4 },
     ],
   },
   {

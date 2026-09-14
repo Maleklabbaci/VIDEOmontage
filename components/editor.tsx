@@ -7,6 +7,8 @@ import {
   CircleHelp,
   Cloud,
   Copy,
+  Crop,
+  Diamond,
   Download,
   Eye,
   FolderUp,
@@ -20,11 +22,13 @@ import {
   Mic2,
   MoreHorizontal,
   MousePointer2,
+  Move,
   Pause,
   Play,
   Plus,
   Redo2,
   RotateCcw,
+  RotateCw,
   Scissors,
   Search,
   Settings2,
@@ -56,6 +60,7 @@ import {
   templates,
   TimelineClip,
   TimelineTrack,
+  TransitionType,
   transitions,
 } from '@/lib/editor-data';
 
@@ -117,7 +122,27 @@ function formatTime(value: number, frames = false) {
 }
 
 function cloneTracks(value: TimelineTrack[]) {
-  return value.map((track) => ({ ...track, clips: track.clips.map((clip) => ({ ...clip })) }));
+  return value.map((track) => ({ ...track, clips: track.clips.map((clip) => ({ ...clip, keyframes: clip.keyframes?.map((keyframe) => ({ ...keyframe })) })) }));
+}
+
+function probeMediaDuration(file: File, url: string) {
+  if (file.type.startsWith('image')) return Promise.resolve(undefined);
+  return new Promise<number | undefined>((resolve) => {
+    const element = document.createElement(file.type.startsWith('audio') ? 'audio' : 'video');
+    const timer = window.setTimeout(() => resolve(undefined), 6000);
+    element.preload = 'metadata';
+    element.onloadedmetadata = () => {
+      window.clearTimeout(timer);
+      resolve(Number.isFinite(element.duration) ? element.duration : undefined);
+      element.removeAttribute('src');
+      element.load();
+    };
+    element.onerror = () => {
+      window.clearTimeout(timer);
+      resolve(undefined);
+    };
+    element.src = url;
+  });
 }
 
 export function Editor() {
@@ -143,13 +168,30 @@ export function Editor() {
   const [renderStatus, setRenderStatus] = useState<'idle' | 'sending' | 'ready' | 'error'>('idle');
   const [renderJob, setRenderJob] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const activeVideo = useMemo(
-    () => assets.find((asset) => asset.id === activeVideoId && asset.kind === 'video'),
-    [assets, activeVideoId],
+  const selectedTimelineClip = useMemo(
+    () => tracks.flatMap((track) => track.clips).find((clip) => clip.id === selectedClipId) ?? null,
+    [tracks, selectedClipId],
+  );
+  const activeVisualClips = useMemo(
+    () => tracks.flatMap((track, trackIndex) => track.kind === 'video'
+      ? track.clips.filter((clip) => currentTime >= clip.start && currentTime < clip.start + clip.duration).map((clip) => ({ clip, trackIndex }))
+      : []),
+    [tracks, currentTime],
+  );
+  const activeAudioClips = useMemo(
+    () => tracks.flatMap((track) => track.kind === 'audio' && !track.muted
+      ? track.clips.filter((clip) => currentTime >= clip.start && currentTime < clip.start + clip.duration)
+      : []),
+    [tracks, currentTime],
+  );
+  const activeTextClips = useMemo(
+    () => tracks.flatMap((track) => track.kind === 'text'
+      ? track.clips.filter((clip) => currentTime >= clip.start && currentTime < clip.start + clip.duration)
+      : []),
+    [tracks, currentTime],
   );
   const currentCaption = useMemo(() => {
     const captionClips = tracks.find((track) => track.id === 'captions')?.clips ?? [];
@@ -173,11 +215,11 @@ export function Editor() {
   };
 
   useEffect(() => {
-    if (!playing || activeVideo?.url) return;
+    if (!playing) return;
     let frame = 0;
     let last = performance.now();
     const tick = (now: number) => {
-      const delta = (now - last) / 1000;
+      const delta = Math.min(.1, (now - last) / 1000);
       last = now;
       setCurrentTime((time) => {
         const next = time + delta;
@@ -191,11 +233,7 @@ export function Editor() {
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, activeVideo?.url]);
-
-  useEffect(() => {
-    if (videoRef.current) videoRef.current.volume = volume / 100;
-  }, [volume]);
+  }, [playing]);
 
   useEffect(() => {
     const captionClips = tracks.find((track) => track.id === 'captions')?.clips ?? [];
@@ -319,6 +357,87 @@ export function Editor() {
     commitTimeline((current) => current.map((track) => track.id === trackId ? { ...track, locked: !track.locked } : track));
   };
 
+  const updateSelectedClip = (patch: Partial<TimelineClip>) => {
+    if (!selectedClipId) return;
+    commitTimeline((current) => current.map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) => clip.id === selectedClipId ? { ...clip, ...patch } : clip),
+    })));
+  };
+
+  const applyTransition = (transition: TransitionType) => {
+    if (!selectedTimelineClip || (selectedTimelineClip.kind !== 'video' && selectedTimelineClip.kind !== 'image')) {
+      notify('Sélectionne d’abord un clip vidéo ou image');
+      return;
+    }
+    updateSelectedClip({ transitionIn: transition, transitionDuration: transition === 'none' ? 0 : .5 });
+    notify(`Transition ${transition === 'none' ? 'supprimée' : transition} appliquée`);
+  };
+
+  const applyTemplate = (templateId: string) => {
+    const styles: Record<string, Partial<CaptionStyle>> = {
+      t1: PRESETS[0].patch,
+      t2: PRESETS[1].patch,
+      t3: { ...PRESETS[2].patch, accentColor: '#20c997' },
+      t4: { ...PRESETS[3].patch, accentColor: '#ff4f91', backgroundColor: '#ff4f91' },
+    };
+    commitStyle(styles[templateId] ?? PRESETS[0].patch);
+    notify('Modèle appliqué au projet');
+  };
+
+  const applyEffect = (effect: NonNullable<TimelineClip['effect']>) => {
+    if (!selectedTimelineClip || (selectedTimelineClip.kind !== 'video' && selectedTimelineClip.kind !== 'image')) {
+      notify('Sélectionne d’abord un clip vidéo ou image');
+      return;
+    }
+    updateSelectedClip({ effect });
+    notify(`Effet ${effect} appliqué`);
+  };
+
+  const addTransformKeyframes = () => {
+    if (!selectedTimelineClip || !['video', 'image', 'text'].includes(selectedTimelineClip.kind)) return;
+    const localTime = Math.min(selectedTimelineClip.duration, Math.max(0, currentTime - selectedTimelineClip.start));
+    const values = {
+      x: selectedTimelineClip.x ?? 0,
+      y: selectedTimelineClip.y ?? 0,
+      scale: selectedTimelineClip.scale ?? 1,
+      rotation: selectedTimelineClip.rotation ?? 0,
+      opacity: selectedTimelineClip.opacity ?? 1,
+    };
+    const retained = (selectedTimelineClip.keyframes ?? []).filter((keyframe) => Math.abs(keyframe.time - localTime) > .03);
+    const keyframes = (Object.entries(values) as Array<[keyof typeof values, number]>).map(([property, value]) => ({
+      id: `kf-${property}-${Date.now().toString(36)}`,
+      time: localTime,
+      property,
+      value,
+    }));
+    updateSelectedClip({ keyframes: [...retained, ...keyframes] });
+    notify(`Keyframe ajouté à ${localTime.toFixed(2)}s`);
+  };
+
+  const clearTransformKeyframes = () => {
+    if (!selectedTimelineClip) return;
+    updateSelectedClip({ keyframes: [] });
+    notify('Keyframes supprimés');
+  };
+
+  const addTextClip = (text: string) => {
+    const clipId = `text-${Date.now().toString(36)}`;
+    const trackId = 'text-main';
+    const clip: TimelineClip = { id: clipId, trackId, kind: 'text', name: text, text, start: Math.min(currentTime, TOTAL_DURATION - 4), duration: 4, sourceStart: 0, color: '#ffffff', x: 0, y: -24, scale: 1, rotation: 0, opacity: 1 };
+    commitTimeline((current) => {
+      const existing = current.find((track) => track.id === trackId);
+      if (existing) return current.map((track) => track.id === trackId ? { ...track, clips: [...track.clips, clip] } : track);
+      const insertAt = current.findIndex((track) => track.kind === 'caption');
+      const nextTrack: TimelineTrack = { id: trackId, name: 'Textes', kind: 'text', locked: false, muted: false, clips: [clip] };
+      const copy = [...current];
+      copy.splice(insertAt < 0 ? current.length : insertAt, 0, nextTrack);
+      return copy;
+    });
+    setSelectedClipId(clipId);
+    notify('Texte ajouté à la timeline');
+  };
+
   const addAssetToTimeline = (asset: MediaAsset) => {
     const defaultDuration = asset.kind === 'image' ? 4 : 6;
     const duration = Math.min(TOTAL_DURATION, Math.max(.5, asset.duration ?? defaultDuration));
@@ -349,27 +468,11 @@ export function Editor() {
   };
 
   const togglePlayback = async () => {
-    if (activeVideo?.url && videoRef.current) {
-      if (playing) {
-        videoRef.current.pause();
-        setPlaying(false);
-      } else {
-        if (videoRef.current.currentTime >= videoRef.current.duration) videoRef.current.currentTime = 0;
-        await videoRef.current.play();
-        setPlaying(true);
-      }
-      return;
-    }
     setPlaying((value) => !value);
   };
 
   const seek = (time: number) => {
-    const next = Math.min(TOTAL_DURATION, Math.max(0, time));
-    setCurrentTime(next);
-    if (videoRef.current && activeVideo?.url) {
-      const videoDuration = Number.isFinite(videoRef.current.duration) ? videoRef.current.duration : TOTAL_DURATION;
-      videoRef.current.currentTime = Math.min(next, videoDuration);
-    }
+    setCurrentTime(Math.min(TOTAL_DURATION, Math.max(0, time)));
   };
 
   useEffect(() => {
@@ -397,28 +500,49 @@ export function Editor() {
     return () => window.removeEventListener('keydown', onKeyDown);
   });
 
-  const onUpload = (event: ChangeEvent<HTMLInputElement>) => {
+  const onUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
-    const nextAssets: MediaAsset[] = files.map((file, index) => {
-      const kind: MediaAsset['kind'] = file.type.startsWith('video')
-        ? 'video'
-        : file.type.startsWith('audio')
-          ? 'audio'
-          : 'image';
-      return {
-        id: `upload-${Date.now()}-${index}`,
+    const batchId = Date.now();
+    const localEntries = files.map((file, index) => {
+      const kind: MediaAsset['kind'] = file.type.startsWith('video') ? 'video' : file.type.startsWith('audio') ? 'audio' : 'image';
+      const url = URL.createObjectURL(file);
+      const asset: MediaAsset = {
+        id: `upload-${batchId}-${index}`,
         name: file.name,
         kind,
-        url: URL.createObjectURL(file),
+        url,
         color: PALETTE[(assets.length + index) % PALETTE.length],
       };
+      return { file, asset, localUrl: url };
     });
-    setAssets((list) => [...nextAssets, ...list]);
-    const firstVideo = nextAssets.find((asset) => asset.kind === 'video');
-    if (firstVideo) setActiveVideoId(firstVideo.id);
-    notify(`${files.length} média${files.length > 1 ? 's' : ''} ajouté${files.length > 1 ? 's' : ''}`);
+    setAssets((list) => [...localEntries.map((entry) => entry.asset), ...list]);
+    const firstVideo = localEntries.find((entry) => entry.asset.kind === 'video');
+    if (firstVideo) setActiveVideoId(firstVideo.asset.id);
+    notify(`${files.length} média${files.length > 1 ? 's' : ''} importé${files.length > 1 ? 's' : ''} · stockage en cours`);
     event.target.value = '';
+
+    await Promise.all(localEntries.map(async ({ file, asset, localUrl }) => {
+      const duration = await probeMediaDuration(file, localUrl);
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const response = await fetch('/api/assets', { method: 'POST', body: formData });
+        if (!response.ok) throw new Error('upload failed');
+        const uploaded = await response.json();
+        setAssets((list) => list.map((item) => item.id === asset.id ? {
+          ...item,
+          storageId: uploaded.storageId,
+          url: uploaded.url,
+          duration,
+        } : item));
+        URL.revokeObjectURL(localUrl);
+      } catch {
+        setAssets((list) => list.map((item) => item.id === asset.id ? { ...item, duration } : item));
+        notify(`${asset.name} reste local : stockage indisponible`);
+      }
+    }));
+    notify('Médias prêts pour la preview et le rendu');
   };
 
   const updateCurrentCaption = (text: string) => {
@@ -444,14 +568,21 @@ export function Editor() {
           captions,
           captionStyle,
           tracks,
-          assets: assets.map(({ id, name, kind, duration }) => ({ id, name, kind, duration })),
+          assets: assets.map(({ id, name, kind, duration, storageId }) => ({ id, name, kind, duration, storageId })),
         }),
       });
-      if (!response.ok) throw new Error('Render request failed');
-      const data = await response.json();
-      setRenderJob(data.jobId);
+      if (!response.ok) throw new Error(await response.text());
+      const video = await response.blob();
+      const url = URL.createObjectURL(video);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${projectName.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'darja-video'}.mp4`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setRenderJob(`${(video.size / 1024 / 1024).toFixed(1)} Mo`);
       setRenderStatus('ready');
-    } catch {
+    } catch (error) {
+      console.error(error);
       setRenderStatus('error');
     }
   };
@@ -466,7 +597,7 @@ export function Editor() {
       captions,
       captionStyle,
       tracks,
-      assets: assets.map(({ id, name, kind, duration }) => ({ id, name, kind, duration })),
+      assets: assets.map(({ id, name, kind, duration, storageId }) => ({ id, name, kind, duration, storageId })),
     };
     const blob = new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -560,6 +691,12 @@ export function Editor() {
             setCurrentTime={seek}
             updateCurrentCaption={updateCurrentCaption}
             addAssetToTimeline={addAssetToTimeline}
+            addTextClip={addTextClip}
+            selectedTimelineClip={selectedTimelineClip}
+            applyTransition={applyTransition}
+            applyEffect={applyEffect}
+            applyTemplate={applyTemplate}
+            selectVoiceTrack={() => { setSelectedClipId('clip-voice'); seek(0); }}
             notify={notify}
           />
           <input ref={fileInputRef} className="hidden-input" type="file" multiple accept="video/*,image/*,audio/*" onChange={onUpload} />
@@ -569,8 +706,8 @@ export function Editor() {
           <div className="workspace-bar">
             <button className="canvas-select"><MousePointer2 size={15} /> Sélection <ChevronDown size={14} /></button>
             <div className="canvas-actions">
-              <button className="icon-button small" title="Découper"><Scissors size={16} /></button>
-              <button className="icon-button small" title="Ajuster"><SlidersHorizontal size={16} /></button>
+              <button className="icon-button small" title="Découper" onClick={splitSelectedClip}><Scissors size={16} /></button>
+              <button className="icon-button small" title="Ajuster le clip" onClick={() => selectedClipId && notify('Réglages du clip ouverts à droite')}><SlidersHorizontal size={16} /></button>
               <span className="zoom-label">Ajuster</span>
               <button className="icon-button small" title="Plein écran"><Maximize2 size={16} /></button>
             </div>
@@ -579,19 +716,23 @@ export function Editor() {
           <div className="stage-area">
             <div className="stage-shadow">
               <div className={`video-canvas preset-${captionStyle.preset}`} style={captionCss}>
-                {activeVideo?.url ? (
-                  <video
-                    ref={videoRef}
-                    src={activeVideo.url}
-                    playsInline
-                    onTimeUpdate={(event) => setCurrentTime(Math.min(event.currentTarget.currentTime, TOTAL_DURATION))}
-                    onEnded={() => setPlaying(false)}
-                    onPause={() => setPlaying(false)}
-                    onPlay={() => setPlaying(true)}
+                {activeVisualClips.length ? activeVisualClips.map(({ clip, trackIndex }, index) => (
+                  <VisualClipLayer
+                    key={clip.id}
+                    clip={clip}
+                    asset={assets.find((asset) => asset.id === clip.assetId)}
+                    currentTime={currentTime}
+                    playing={playing}
+                    selected={clip.id === selectedClipId}
+                    zIndex={trackIndex * 10 + index}
+                    onSelect={() => setSelectedClipId(clip.id)}
                   />
-                ) : (
-                  <DemoVisual />
-                )}
+                )) : <div className="empty-canvas"><ImagePlus size={24} /><span>Aucun clip à cet instant</span></div>}
+                {activeAudioClips.map((clip) => {
+                  const asset = assets.find((item) => item.id === clip.assetId);
+                  return asset?.url ? <AudioClipLayer key={clip.id} clip={clip} asset={asset} currentTime={currentTime} playing={playing} volume={volume} /> : null;
+                })}
+                {activeTextClips.map((clip) => <TextClipLayer key={clip.id} clip={clip} currentTime={currentTime} selected={clip.id === selectedClipId} onSelect={() => setSelectedClipId(clip.id)} />)}
                 <div className="safe-zone" />
                 <div
                   dir={scriptMode === 'arabic' ? 'rtl' : 'ltr'}
@@ -621,60 +762,16 @@ export function Editor() {
           </div>
         </main>
 
-        <aside className="inspector-panel">
-          <div className="inspector-head">
-            <div><Type size={17} /><strong>Style des captions</strong></div>
-            <button className="icon-button small"><MoreHorizontal size={18} /></button>
-          </div>
-          <div className="inspector-scroll">
-            <section className="control-section">
-              <label className="section-label">MODÈLES</label>
-              <div className="preset-grid">
-                {PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    className={`preset-card ${captionStyle.preset === preset.id ? 'active' : ''} ${preset.id}`}
-                    onClick={() => commitStyle(preset.patch)}
-                  >
-                    <span>{preset.sample}</span>
-                    <small>{preset.name}</small>
-                    {captionStyle.preset === preset.id && <i><Check size={11} /></i>}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="control-section">
-              <div className="section-row"><label className="section-label">TYPOGRAPHIE</label><button>Réinitialiser</button></div>
-              <button className="select-field"><strong>Montserrat ExtraBold</strong><ChevronDown size={15} /></button>
-              <div className="triple-controls">
-                <div><span>Taille</span><input type="number" value={captionStyle.fontSize} onChange={(e) => commitStyle({ fontSize: Number(e.target.value) })} /></div>
-                <button className={captionStyle.uppercase ? 'toggle-button active' : 'toggle-button'} onClick={() => commitStyle({ uppercase: !captionStyle.uppercase })}>AA</button>
-                <button className={captionStyle.shadow ? 'toggle-button active' : 'toggle-button'} onClick={() => commitStyle({ shadow: !captionStyle.shadow })}>S</button>
-              </div>
-            </section>
-
-            <section className="control-section">
-              <label className="section-label">COULEURS</label>
-              <ColorControl label="Texte" value={captionStyle.textColor} onChange={(value) => commitStyle({ textColor: value })} />
-              <ColorControl label="Accent" value={captionStyle.accentColor} onChange={(value) => commitStyle({ accentColor: value })} />
-              <ColorControl label="Fond" value={captionStyle.backgroundColor} onChange={(value) => commitStyle({ backgroundColor: value })} />
-            </section>
-
-            <section className="control-section">
-              <div className="section-row"><label className="section-label">POSITION</label><span>{captionStyle.position}%</span></div>
-              <div className="position-control">
-                <div className="phone-position"><i style={{ top: `${captionStyle.position}%` }} /></div>
-                <input type="range" min="15" max="88" value={captionStyle.position} onChange={(e) => commitStyle({ position: Number(e.target.value) })} />
-              </div>
-            </section>
-
-            <section className="control-section compact">
-              <button className="expand-row"><WandSparkles size={17} /><span>Animation d’entrée</span><strong>Pop</strong><ChevronDown size={15} /></button>
-              <button className="expand-row"><Languages size={17} /><span>Langue</span><strong>Darija DZ</strong><ChevronDown size={15} /></button>
-            </section>
-          </div>
-        </aside>
+        <InspectorPanel
+          clip={selectedTimelineClip}
+          currentTime={currentTime}
+          captionStyle={captionStyle}
+          commitStyle={commitStyle}
+          updateClip={updateSelectedClip}
+          addKeyframes={addTransformKeyframes}
+          clearKeyframes={clearTransformKeyframes}
+          applyTransition={applyTransition}
+        />
 
         <Timeline
           currentTime={currentTime}
@@ -731,6 +828,12 @@ function PanelContent({
   setCurrentTime,
   updateCurrentCaption,
   addAssetToTimeline,
+  addTextClip,
+  selectedTimelineClip,
+  applyTransition,
+  applyEffect,
+  applyTemplate,
+  selectVoiceTrack,
   notify,
 }: {
   activeTab: TabId;
@@ -745,6 +848,12 @@ function PanelContent({
   setCurrentTime: (time: number) => void;
   updateCurrentCaption: (text: string) => void;
   addAssetToTimeline: (asset: MediaAsset) => void;
+  addTextClip: (text: string) => void;
+  selectedTimelineClip: TimelineClip | null;
+  applyTransition: (transition: TransitionType) => void;
+  applyEffect: (effect: NonNullable<TimelineClip['effect']>) => void;
+  applyTemplate: (templateId: string) => void;
+  selectVoiceTrack: () => void;
   notify: (message: string) => void;
 }) {
   if (activeTab === 'media') {
@@ -816,7 +925,7 @@ function PanelContent({
           <div className="filter-chips"><button className="active">Pour vous</button><button>Reels</button><button>Ads</button></div>
           <div className="template-grid">
             {templates.map((template) => (
-              <button key={template.id} className="template-card" onClick={() => notify(`${template.name} appliqué`)}>
+              <button key={template.id} className="template-card" onClick={() => applyTemplate(template.id)}>
                 <div style={{ background: `linear-gradient(145deg, ${template.colors[0]}, ${template.colors[1]})` }}>
                   <strong>{template.name.split(' ')[0]}</strong><span>{template.format}</span>
                 </div>
@@ -837,9 +946,16 @@ function PanelContent({
           <div className="search-box"><Search size={15} /><input placeholder="Rechercher" /></div>
           <p className="helper-copy">Clique sur une transition pour l’ajouter entre les deux clips sélectionnés.</p>
           <div className="transition-grid">
-            {transitions.map((transition) => (
-              <button key={transition.id} onClick={() => notify(`Transition “${transition.name}” ajoutée`)}><span>{transition.symbol}</span><small>{transition.name}</small></button>
-            ))}
+            {transitions.map((transition) => {
+              const transitionType = ({ tr1: 'fade', tr2: 'slide', tr3: 'zoom', tr4: 'flash', tr5: 'rotate', tr6: 'wipe' } as const)[transition.id as keyof { tr1: 'fade'; tr2: 'slide'; tr3: 'zoom'; tr4: 'flash'; tr5: 'rotate'; tr6: 'wipe' }];
+              return (
+                <button
+                  key={transition.id}
+                  className={selectedTimelineClip?.transitionIn === transitionType ? 'active' : ''}
+                  onClick={() => applyTransition(transitionType)}
+                ><span>{transition.symbol}</span><small>{transition.name}</small></button>
+              );
+            })}
           </div>
         </div>
       </>
@@ -852,13 +968,16 @@ function PanelContent({
         <PanelHeader title="Effets" badge="Nouveau" />
         <div className="panel-content">
           <div className="effects-list">
-            {effects.map(({ id, name, icon: Icon, color }) => (
-              <button key={id} onClick={() => notify(`Effet “${name}” activé`)}>
-                <i style={{ background: `${color}20`, color }}><Icon size={20} /></i>
-                <span><strong>{name}</strong><small>Glisser sur un clip</small></span>
-                <Plus size={17} />
-              </button>
-            ))}
+            {effects.map(({ id, name, icon: Icon, color }) => {
+              const effect = ({ fx1: 'enhance', fx2: 'grain', fx3: 'glow', fx4: 'motionBlur' } as const)[id as 'fx1' | 'fx2' | 'fx3' | 'fx4'];
+              return (
+                <button key={id} className={selectedTimelineClip?.effect === effect ? 'active' : ''} onClick={() => applyEffect(effect)}>
+                  <i style={{ background: `${color}20`, color }}><Icon size={20} /></i>
+                  <span><strong>{name}</strong><small>Appliquer au clip sélectionné</small></span>
+                  {selectedTimelineClip?.effect === effect ? <Check size={17} /> : <Plus size={17} />}
+                </button>
+              );
+            })}
           </div>
         </div>
       </>
@@ -870,7 +989,7 @@ function PanelContent({
       <>
         <PanelHeader title="Audio" />
         <div className="panel-content">
-          <button className="voice-card" onClick={() => notify('Voix off sélectionnée')}>
+          <button className="voice-card" onClick={selectVoiceTrack}>
             <i><Mic2 size={22} /></i><span><strong>Voix off Darija</strong><small>00:32 · timestamps inclus</small></span><Play size={16} fill="currentColor" />
           </button>
           <label className="section-mini-title">RÉGLAGES</label>
@@ -887,12 +1006,12 @@ function PanelContent({
     <>
       <PanelHeader title="Texte" />
       <div className="panel-content">
-        <button className="add-text-button" onClick={() => notify('Bloc de texte ajouté')}><Plus size={18} /> Ajouter un texte</button>
+        <button className="add-text-button" onClick={() => addTextClip('NOUVEAU TEXTE')}><Plus size={18} /> Ajouter un texte</button>
         <label className="section-mini-title">STYLES RAPIDES</label>
         <div className="text-styles">
-          <button onClick={() => notify('Titre ajouté')}><strong>TITRE</strong><span>Montserrat Bold</span></button>
-          <button onClick={() => notify('Sous-titre ajouté')}><strong>Sous-titre</strong><span>Inter Medium</span></button>
-          <button onClick={() => notify('Texte arabe ajouté')} dir="rtl"><strong>عنوان بالدارجة</strong><span>Alexandria Bold</span></button>
+          <button onClick={() => addTextClip('TITRE')}><strong>TITRE</strong><span>Montserrat Bold</span></button>
+          <button onClick={() => addTextClip('Sous-titre')}><strong>Sous-titre</strong><span>Inter Medium</span></button>
+          <button onClick={() => addTextClip('عنوان بالدارجة')} dir="rtl"><strong>عنوان بالدارجة</strong><span>Alexandria Bold</span></button>
         </div>
       </div>
     </>
@@ -915,6 +1034,262 @@ function ColorControl({ label, value, onChange }: { label: string; value: string
       <label><i style={{ background: value }} /><input type="color" value={value} onChange={(event) => onChange(event.target.value)} /><strong>{value.toUpperCase()}</strong></label>
     </div>
   );
+}
+
+function getAnimatedValue(clip: TimelineClip, property: 'x' | 'y' | 'scale' | 'rotation' | 'opacity', localTime: number) {
+  const defaults = { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 };
+  const base = clip[property] ?? defaults[property];
+  const frames = (clip.keyframes ?? []).filter((frame) => frame.property === property).sort((a, b) => a.time - b.time);
+  if (!frames.length) return base;
+  const previous = [...frames].reverse().find((frame) => frame.time <= localTime);
+  const next = frames.find((frame) => frame.time > localTime);
+  if (!previous && next) {
+    if (next.time <= .001) return next.value;
+    const progress = Math.max(0, Math.min(1, localTime / next.time));
+    return base + (next.value - base) * progress;
+  }
+  if (previous && next) {
+    const progress = Math.max(0, Math.min(1, (localTime - previous.time) / (next.time - previous.time)));
+    return previous.value + (next.value - previous.value) * progress;
+  }
+  return previous?.value ?? base;
+}
+
+function VisualClipLayer({
+  clip,
+  asset,
+  currentTime,
+  playing,
+  selected,
+  zIndex,
+  onSelect,
+}: {
+  clip: TimelineClip;
+  asset?: MediaAsset;
+  currentTime: number;
+  playing: boolean;
+  selected: boolean;
+  zIndex: number;
+  onSelect: () => void;
+}) {
+  const mediaRef = useRef<HTMLVideoElement>(null);
+  const localTime = Math.max(0, currentTime - clip.start);
+  const x = getAnimatedValue(clip, 'x', localTime);
+  const y = getAnimatedValue(clip, 'y', localTime);
+  const baseScale = getAnimatedValue(clip, 'scale', localTime);
+  const baseRotation = getAnimatedValue(clip, 'rotation', localTime);
+  const baseOpacity = getAnimatedValue(clip, 'opacity', localTime);
+  const transition = clip.transitionIn ?? 'none';
+  const transitionDuration = Math.max(.05, clip.transitionDuration ?? .45);
+  const progress = transition === 'none' ? 1 : Math.min(1, localTime / transitionDuration);
+  let transitionScale = 1;
+  let transitionX = 0;
+  let transitionRotation = 0;
+  let transitionOpacity = 1;
+  let brightness = 1;
+  let wipeRight = 0;
+  if (transition === 'fade') transitionOpacity = progress;
+  if (transition === 'slide') transitionX = (1 - progress) * 105;
+  if (transition === 'zoom') transitionScale = .72 + progress * .28;
+  if (transition === 'rotate') transitionRotation = (1 - progress) * -16;
+  if (transition === 'flash') brightness = 1 + (1 - progress) * 2.2;
+  if (transition === 'wipe') wipeRight = (1 - progress) * 100;
+
+  useEffect(() => {
+    const video = mediaRef.current;
+    if (!video) return;
+    const desired = clip.sourceStart + localTime;
+    if (Number.isFinite(video.duration) && Math.abs(video.currentTime - desired) > .12) video.currentTime = Math.min(desired, Math.max(0, video.duration - .03));
+    if (playing && video.paused) void video.play().catch(() => undefined);
+    if (!playing && !video.paused) video.pause();
+  }, [clip.sourceStart, localTime, playing]);
+
+  const effectFilter = clip.effect === 'enhance' ? 'saturate(1.22) contrast(1.1)' : clip.effect === 'glow' ? 'saturate(1.14) drop-shadow(0 0 10px rgba(255,255,255,.3))' : clip.effect === 'motionBlur' ? 'blur(.8px)' : '';
+  const style = {
+    zIndex,
+    opacity: Math.max(0, Math.min(1, baseOpacity * transitionOpacity)),
+    transform: `translate(-50%, -50%) translate(${x + transitionX}%, ${y}%) scale(${Math.max(.05, baseScale * transitionScale)}) rotate(${baseRotation + transitionRotation}deg)`,
+    clipPath: `inset(${clip.cropTop ?? 0}% ${Math.max(clip.cropRight ?? 0, wipeRight)}% ${clip.cropBottom ?? 0}% ${clip.cropLeft ?? 0}%)`,
+    filter: `${effectFilter} brightness(${brightness})`,
+  } as CSSProperties;
+
+  return (
+    <div className={`visual-clip-layer effect-${clip.effect ?? 'none'} ${selected ? 'selected' : ''}`} style={style} onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}>
+      {asset?.url && clip.kind === 'video' ? (
+        <video ref={mediaRef} src={asset.url} playsInline muted preload="auto" />
+      ) : asset?.url && clip.kind === 'image' ? (
+        <img src={asset.url} alt="" />
+      ) : clip.id === 'clip-intro' ? (
+        <DemoVisual />
+      ) : (
+        <div className="mock-visual" style={{ background: `radial-gradient(circle at 72% 24%, ${clip.color}, transparent 42%), linear-gradient(145deg, ${clip.color}bb, #12131a 72%)` }}>
+          <Grid2X2 size={30} /><strong>{clip.name}</strong><span>{formatTime(clip.sourceStart)} → {formatTime(clip.sourceStart + clip.duration)}</span>
+        </div>
+      )}
+      {selected && <span className="canvas-selection-label">{clip.name}</span>}
+    </div>
+  );
+}
+
+function AudioClipLayer({ clip, asset, currentTime, playing, volume }: { clip: TimelineClip; asset: MediaAsset; currentTime: number; playing: boolean; volume: number }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const localTime = Math.max(0, currentTime - clip.start);
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const desired = clip.sourceStart + localTime;
+    audio.volume = Math.max(0, Math.min(1, (volume / 100) * (clip.volume ?? 1)));
+    if (Number.isFinite(audio.duration) && Math.abs(audio.currentTime - desired) > .14) audio.currentTime = Math.min(desired, Math.max(0, audio.duration - .03));
+    if (playing && audio.paused) void audio.play().catch(() => undefined);
+    if (!playing && !audio.paused) audio.pause();
+  }, [clip.sourceStart, clip.volume, localTime, playing, volume]);
+  return <audio ref={audioRef} src={asset.url} preload="auto" />;
+}
+
+function TextClipLayer({ clip, currentTime, selected, onSelect }: { clip: TimelineClip; currentTime: number; selected: boolean; onSelect: () => void }) {
+  const localTime = Math.max(0, currentTime - clip.start);
+  const x = getAnimatedValue(clip, 'x', localTime);
+  const y = getAnimatedValue(clip, 'y', localTime);
+  const scale = getAnimatedValue(clip, 'scale', localTime);
+  const rotation = getAnimatedValue(clip, 'rotation', localTime);
+  const opacity = getAnimatedValue(clip, 'opacity', localTime);
+  return <div className={`free-text-layer ${selected ? 'selected' : ''}`} style={{ opacity, transform: `translate(-50%, -50%) translate(${x}%, ${y}%) scale(${scale}) rotate(${rotation}deg)` }} onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}>{clip.text ?? clip.name}</div>;
+}
+
+function InspectorPanel({
+  clip,
+  currentTime,
+  captionStyle,
+  commitStyle,
+  updateClip,
+  addKeyframes,
+  clearKeyframes,
+  applyTransition,
+}: {
+  clip: TimelineClip | null;
+  currentTime: number;
+  captionStyle: CaptionStyle;
+  commitStyle: (patch: Partial<CaptionStyle>) => void;
+  updateClip: (patch: Partial<TimelineClip>) => void;
+  addKeyframes: () => void;
+  clearKeyframes: () => void;
+  applyTransition: (transition: TransitionType) => void;
+}) {
+  const isVisual = clip?.kind === 'video' || clip?.kind === 'image';
+  if (isVisual && clip) {
+    const localTime = Math.max(0, Math.min(clip.duration, currentTime - clip.start));
+    return (
+      <aside className="inspector-panel">
+        <div className="inspector-head">
+          <div><SlidersHorizontal size={17} /><span><strong>Réglages du clip</strong><small>{clip.name}</small></span></div>
+          <button className="icon-button small"><MoreHorizontal size={18} /></button>
+        </div>
+        <div className="inspector-scroll">
+          <section className="control-section clip-source-section">
+            <div className="section-row"><label className="section-label">DÉCOUPAGE SOURCE</label><span>{formatTime(localTime, true)}</span></div>
+            <div className="inspector-two-cols">
+              <InspectorNumber label="Début source" value={clip.sourceStart} step={.1} min={0} onChange={(value) => updateClip({ sourceStart: value })} suffix="s" />
+              <InspectorNumber label="Durée" value={clip.duration} step={.1} min={.2} max={TOTAL_DURATION - clip.start} onChange={(value) => updateClip({ duration: value })} suffix="s" />
+            </div>
+            <p>Les poignées de la timeline modifient ces valeurs sans altérer le fichier original.</p>
+          </section>
+
+          <section className="control-section">
+            <div className="section-row"><label className="section-label">TRANSFORMATION</label><Move size={13} /></div>
+            <div className="inspector-two-cols">
+              <InspectorNumber label="Position X" value={clip.x ?? 0} step={1} min={-150} max={150} onChange={(value) => updateClip({ x: value })} suffix="%" />
+              <InspectorNumber label="Position Y" value={clip.y ?? 0} step={1} min={-150} max={150} onChange={(value) => updateClip({ y: value })} suffix="%" />
+              <InspectorNumber label="Échelle" value={clip.scale ?? 1} step={.05} min={.05} max={4} onChange={(value) => updateClip({ scale: value })} suffix="×" />
+              <InspectorNumber label="Rotation" value={clip.rotation ?? 0} step={1} min={-360} max={360} onChange={(value) => updateClip({ rotation: value })} suffix="°" />
+            </div>
+            <label className="inspector-range"><span>Opacité <strong>{Math.round((clip.opacity ?? 1) * 100)}%</strong></span><input type="range" min="0" max="1" step=".01" value={clip.opacity ?? 1} onChange={(event) => updateClip({ opacity: Number(event.target.value) })} /></label>
+            <button className="reset-clip-button" onClick={() => updateClip({ x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 })}><RotateCcw size={13} /> Réinitialiser la transformation</button>
+          </section>
+
+          <section className="control-section">
+            <div className="section-row"><label className="section-label">CROP</label><Crop size={13} /></div>
+            <div className="crop-grid">
+              <InspectorNumber label="Haut" value={clip.cropTop ?? 0} min={0} max={90} onChange={(value) => updateClip({ cropTop: value })} suffix="%" />
+              <InspectorNumber label="Droite" value={clip.cropRight ?? 0} min={0} max={90} onChange={(value) => updateClip({ cropRight: value })} suffix="%" />
+              <InspectorNumber label="Bas" value={clip.cropBottom ?? 0} min={0} max={90} onChange={(value) => updateClip({ cropBottom: value })} suffix="%" />
+              <InspectorNumber label="Gauche" value={clip.cropLeft ?? 0} min={0} max={90} onChange={(value) => updateClip({ cropLeft: value })} suffix="%" />
+            </div>
+          </section>
+
+          <section className="control-section">
+            <label className="section-label">TRANSITION D’ENTRÉE</label>
+            <div className="transition-select-row">
+              {(['none', 'fade', 'slide', 'zoom', 'wipe'] as TransitionType[]).map((transition) => <button key={transition} className={clip.transitionIn === transition ? 'active' : ''} onClick={() => applyTransition(transition)}>{transition}</button>)}
+            </div>
+            {clip.transitionIn && clip.transitionIn !== 'none' && <label className="inspector-range"><span>Durée <strong>{(clip.transitionDuration ?? .5).toFixed(2)}s</strong></span><input type="range" min=".1" max="2" step=".05" value={clip.transitionDuration ?? .5} onChange={(event) => updateClip({ transitionDuration: Number(event.target.value) })} /></label>}
+          </section>
+
+          <section className="control-section">
+            <div className="section-row"><label className="section-label">KEYFRAMES</label><span>{clip.keyframes?.length ?? 0}</span></div>
+            <div className="keyframe-actions">
+              <button onClick={addKeyframes}><Diamond size={13} fill="currentColor" /> Ajouter à {localTime.toFixed(2)}s</button>
+              <button onClick={clearKeyframes} disabled={!clip.keyframes?.length}><Trash2 size={13} /></button>
+            </div>
+            <p className="keyframe-help">Change les valeurs, déplace le curseur, puis ajoute un autre keyframe. La preview interpole automatiquement.</p>
+          </section>
+        </div>
+      </aside>
+    );
+  }
+
+  if (clip?.kind === 'text') {
+    return (
+      <aside className="inspector-panel">
+        <div className="inspector-head"><div><Type size={17} /><span><strong>Réglages du texte</strong><small>{clip.name}</small></span></div></div>
+        <div className="inspector-scroll">
+          <section className="control-section"><label className="section-label">CONTENU</label><textarea className="inspector-textarea" value={clip.text ?? clip.name} onChange={(event) => updateClip({ text: event.target.value, name: event.target.value })} /></section>
+          <section className="control-section"><label className="section-label">TRANSFORMATION</label><div className="inspector-two-cols"><InspectorNumber label="Position X" value={clip.x ?? 0} min={-150} max={150} onChange={(value) => updateClip({ x: value })} suffix="%" /><InspectorNumber label="Position Y" value={clip.y ?? 0} min={-150} max={150} onChange={(value) => updateClip({ y: value })} suffix="%" /><InspectorNumber label="Échelle" value={clip.scale ?? 1} min={.1} max={4} step={.05} onChange={(value) => updateClip({ scale: value })} suffix="×" /><InspectorNumber label="Rotation" value={clip.rotation ?? 0} min={-360} max={360} onChange={(value) => updateClip({ rotation: value })} suffix="°" /></div></section>
+          <section className="control-section"><div className="keyframe-actions"><button onClick={addKeyframes}><Diamond size={13} fill="currentColor" /> Ajouter un keyframe</button><button onClick={clearKeyframes}><Trash2 size={13} /></button></div></section>
+        </div>
+      </aside>
+    );
+  }
+
+  if (clip?.kind === 'audio') {
+    return (
+      <aside className="inspector-panel">
+        <div className="inspector-head"><div><Volume2 size={17} /><span><strong>Réglages audio</strong><small>{clip.name}</small></span></div></div>
+        <div className="inspector-scroll">
+          <section className="control-section"><label className="section-label">DÉCOUPAGE</label><div className="inspector-two-cols"><InspectorNumber label="Début source" value={clip.sourceStart} min={0} step={.1} onChange={(value) => updateClip({ sourceStart: value })} suffix="s" /><InspectorNumber label="Durée" value={clip.duration} min={.2} step={.1} onChange={(value) => updateClip({ duration: value })} suffix="s" /></div></section>
+          <section className="control-section"><label className="inspector-range"><span>Volume <strong>{Math.round((clip.volume ?? 1) * 100)}%</strong></span><input type="range" min="0" max="2" step=".01" value={clip.volume ?? 1} onChange={(event) => updateClip({ volume: Number(event.target.value) })} /></label></section>
+        </div>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="inspector-panel">
+      <div className="inspector-head">
+        <div><Type size={17} /><strong>Style des captions</strong></div>
+        <button className="icon-button small"><MoreHorizontal size={18} /></button>
+      </div>
+      <div className="inspector-scroll">
+        <section className="control-section">
+          <label className="section-label">MODÈLES</label>
+          <div className="preset-grid">
+            {PRESETS.map((preset) => <button key={preset.id} className={`preset-card ${captionStyle.preset === preset.id ? 'active' : ''} ${preset.id}`} onClick={() => commitStyle(preset.patch)}><span>{preset.sample}</span><small>{preset.name}</small>{captionStyle.preset === preset.id && <i><Check size={11} /></i>}</button>)}
+          </div>
+        </section>
+        <section className="control-section">
+          <div className="section-row"><label className="section-label">TYPOGRAPHIE</label><button>Réinitialiser</button></div>
+          <button className="select-field"><strong>Montserrat ExtraBold</strong><ChevronDown size={15} /></button>
+          <div className="triple-controls"><div><span>Taille</span><input type="number" value={captionStyle.fontSize} onChange={(e) => commitStyle({ fontSize: Number(e.target.value) })} /></div><button className={captionStyle.uppercase ? 'toggle-button active' : 'toggle-button'} onClick={() => commitStyle({ uppercase: !captionStyle.uppercase })}>AA</button><button className={captionStyle.shadow ? 'toggle-button active' : 'toggle-button'} onClick={() => commitStyle({ shadow: !captionStyle.shadow })}>S</button></div>
+        </section>
+        <section className="control-section"><label className="section-label">COULEURS</label><ColorControl label="Texte" value={captionStyle.textColor} onChange={(value) => commitStyle({ textColor: value })} /><ColorControl label="Accent" value={captionStyle.accentColor} onChange={(value) => commitStyle({ accentColor: value })} /><ColorControl label="Fond" value={captionStyle.backgroundColor} onChange={(value) => commitStyle({ backgroundColor: value })} /></section>
+        <section className="control-section"><div className="section-row"><label className="section-label">POSITION</label><span>{captionStyle.position}%</span></div><div className="position-control"><div className="phone-position"><i style={{ top: `${captionStyle.position}%` }} /></div><input type="range" min="15" max="88" value={captionStyle.position} onChange={(e) => commitStyle({ position: Number(e.target.value) })} /></div></section>
+        <section className="control-section compact"><button className="expand-row"><WandSparkles size={17} /><span>Animation d’entrée</span><strong>Pop</strong><ChevronDown size={15} /></button><button className="expand-row"><Languages size={17} /><span>Langue</span><strong>Darija DZ</strong><ChevronDown size={15} /></button></section>
+      </div>
+    </aside>
+  );
+}
+
+function InspectorNumber({ label, value, onChange, min = -9999, max = 9999, step = 1, suffix }: { label: string; value: number; onChange: (value: number) => void; min?: number; max?: number; step?: number; suffix?: string }) {
+  return <label className="inspector-number"><span>{label}</span><div><input type="number" value={Number(value.toFixed(2))} min={min} max={max} step={step} onChange={(event) => onChange(Math.min(max, Math.max(min, Number(event.target.value))))} />{suffix && <i>{suffix}</i>}</div></label>;
 }
 
 function DemoVisual() {
@@ -1230,6 +1605,7 @@ function TimelineClipView({
         <span className="waveform-v2">{Array.from({ length: 64 }, (_, i) => <i key={i} style={{ height: `${18 + ((i * 17) % 70)}%` }} />)}</span>
       )}
       {clip.kind === 'video' && <span className="clip-film-pattern" />}
+      <span className="clip-keyframes">{Array.from(new Set((clip.keyframes ?? []).map((keyframe) => keyframe.time.toFixed(3)))).map((time) => <i key={time} style={{ left: `${(Number(time) / clip.duration) * 100}%` }} />)}</span>
       <span className="clip-copy">
         <strong>{clip.name}</strong>
         {clip.kind !== 'caption' && <small>{clip.duration.toFixed(1)}s</small>}
@@ -1273,9 +1649,9 @@ function ExportDialog({
               <label>Format<button>MP4 · H.264 <ChevronDown size={14} /></button></label>
               <label>Qualité<button>Élevée <ChevronDown size={14} /></button></label>
             </div>
-            <div className="export-summary"><div><Sparkles size={17} /><span><strong>Prêt pour le moteur de rendu</strong><small>32 s · environ 18 Mo · captions intégrées</small></span></div><Check size={17} /></div>
+            <div className="export-summary"><div><Sparkles size={17} /><span><strong>Moteur FFmpeg self-hosted prêt</strong><small>32 s · MP4 H.264 · audio AAC · captions intégrées</small></span></div><Check size={17} /></div>
             {renderStatus === 'ready' && (
-              <div className="render-message success"><Check size={16} /><span><strong>Job {renderJob} créé</strong>Le contrat front/API est validé. Le worker open source FFmpeg + WebCodecs sera connecté à la prochaine phase pour produire le MP4.</span></div>
+              <div className="render-message success"><Check size={16} /><span><strong>Export terminé · {renderJob}</strong>Le fichier MP4 a été généré et téléchargé dans ton navigateur.</span></div>
             )}
             {renderStatus === 'error' && <div className="render-message error">Impossible de préparer le job de rendu.</div>}
           </div>
@@ -1283,7 +1659,7 @@ function ExportDialog({
         <div className="export-footer">
           <button className="manifest-button" onClick={onDownloadProject}>Télécharger le projet JSON</button>
           <button className="render-button" onClick={onRender} disabled={renderStatus === 'sending'}>
-            {renderStatus === 'sending' ? <><RotateCcw className="spin" size={17} /> Préparation…</> : <><Sparkles size={17} /> Préparer le rendu</>}
+            {renderStatus === 'sending' ? <><RotateCcw className="spin" size={17} /> Rendu MP4 en cours…</> : <><Download size={17} /> Exporter le MP4</>}
           </button>
         </div>
       </div>

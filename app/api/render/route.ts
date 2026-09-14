@@ -1,19 +1,26 @@
 import { NextResponse } from 'next/server';
+import { renderVideo, type RenderPayload } from '@/lib/render-video';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
-  const payload = await request.json();
-  const jobId = `render_${Date.now().toString(36)}`;
-
-  return NextResponse.json({
-    jobId,
-    status: 'ready_for_worker',
-    message: 'Composition validée. Le worker open source FFmpeg/WebCodecs peut prendre ce job.',
-    composition: {
-      duration: payload.duration ?? 32,
-      format: payload.format ?? '1080x1920',
-      fps: payload.fps ?? 30,
-      codec: payload.codec ?? 'h264',
-      captions: payload.captions?.length ?? 0,
-    },
-  });
+  try {
+    const payload = await request.json() as RenderPayload;
+    const video = await renderVideo(payload);
+    const safeName = (payload.projectName ?? 'darja-video').normalize('NFKD').replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'darja-video';
+    return new Response(new Uint8Array(video), {
+      headers: {
+        'Content-Type': 'video/mp4',
+        'Content-Length': String(video.length),
+        'Content-Disposition': `attachment; filename="${safeName}.mp4"`,
+        'Cache-Control': 'no-store',
+        'X-Render-Engine': 'ffmpeg-self-hosted',
+      },
+    });
+  } catch (error) {
+    console.error('Render failed', error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Échec du rendu' }, { status: 500 });
+  }
 }
