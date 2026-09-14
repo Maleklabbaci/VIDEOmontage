@@ -17,7 +17,9 @@ npm run dev
 - correction manuelle du texte transcrit et réalignement disponible ;
 - captions karaoke mot par mot dans la preview et l’export FFmpeg/ASS ;
 - planificateur sémantique qui associe chaque scène aux noms/descriptions des médias ;
-- 24 styles complets : 8 Darija, 8 arabes et 8 français ;
+- 24 thèmes complets : 8 Darija, 8 arabes et 8 français ;
+- 24 vraies polices open source et self-hosted, choisissables indépendamment des thèmes ;
+- 10 fonts arabe/Darija et 14 fonts Darija latin/français, identiques dans la preview et l’export FFmpeg ;
 - interface responsive dédiée aux ordinateurs, tablettes et mobiles ;
 - génération d’un projet/timeline complète en un clic ;
 - export MP4 direct ou ouverture dans l’éditeur avancé ;

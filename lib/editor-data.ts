@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import type { CaptionFontKey } from './caption-fonts';
 import {
   Captions,
   Film,
@@ -37,7 +38,7 @@ export type CaptionStyle = {
   position: number;
   uppercase: boolean;
   shadow: boolean;
-  fontFamily?: 'impact' | 'sans' | 'rounded';
+  fontFamily?: CaptionFontKey;
   animation?: 'pop' | 'fade' | 'none';
 };
 

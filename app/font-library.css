@@ -1,0 +1,24 @@
+.font-library-head { margin-top: 3px; padding-top: 9px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #2c2f36; }
+.font-library-head > div:first-child { display: flex; align-items: center; gap: 7px; color: #9d94ff; }
+.font-library-head > div:first-child span { display: flex; flex-direction: column; gap: 1px; }
+.font-library-head strong { color: #d7d9df; font-size: 8.5px; }
+.font-library-head small { color: #686d78; font-size: 6.7px; }
+.font-language-filter { display: flex; gap: 4px; }
+.font-language-filter button { padding: 4px 7px; color: #797e88; border: 1px solid #373a43; border-radius: 5px; background: #202229; font-size: 6.8px; cursor: pointer; }
+.font-language-filter button.active { color: #dedaff; border-color: #6f63df; background: rgba(117,103,255,.13); }
+.caption-font-grid { max-height: 225px; padding: 2px 3px 4px 1px; display: grid; grid-template-columns: repeat(4,1fr); gap: 6px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #464953 transparent; }
+.caption-font-grid > button { min-width: 0; min-height: 64px; padding: 6px 5px 5px; position: relative; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 5px; color: #858a94; border: 1px solid #343740; border-radius: 8px; background: linear-gradient(145deg,#24262d,#1b1d22); cursor: pointer; overflow: hidden; }
+.caption-font-grid > button:hover { color: #bfc2ca; border-color: #555963; transform: translateY(-1px); }
+.caption-font-grid > button.active { color: #dcd9ff; border-color: #7567ff; box-shadow: inset 0 0 0 1px rgba(117,103,255,.2); }
+.caption-font-grid b { max-width: 100%; color: #f1f2f4; font-size: 17px; line-height: 1.1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caption-font-grid span { max-width: 100%; font-size: 6.6px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caption-font-grid i { width: 15px; height: 15px; position: absolute; top: 4px; right: 4px; display: grid; place-items: center; color: white; border-radius: 50%; background: #7567ff; }
+
+@media (max-width: 720px) {
+  .font-library-head { align-items: flex-start; flex-direction: column; }
+  .font-language-filter { width: 100%; }
+  .font-language-filter button { flex: 1; min-height: 30px; }
+  .caption-font-grid { max-height: 310px; grid-template-columns: repeat(2,1fr); }
+  .caption-font-grid > button { min-height: 76px; }
+  .caption-font-grid b { font-size: 20px; }
+}

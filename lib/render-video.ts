@@ -4,6 +4,7 @@ import { readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
+import { getCaptionFont } from './caption-fonts';
 
 type AssetInput = { id: string; name?: string; kind: 'video' | 'image' | 'audio'; storageId?: string };
 type Keyframe = { time: number; property: string; value: number };
@@ -15,7 +16,7 @@ type ClipInput = {
 };
 type TrackInput = { id: string; kind: string; muted?: boolean; clips: ClipInput[] };
 type CaptionInput = { start: number; end: number; text: string; words?: Array<{ word: string; start: number; end: number }> };
-type CaptionStyleInput = { preset?: string; fontSize?: number; textColor?: string; accentColor?: string; position?: number; uppercase?: boolean };
+type CaptionStyleInput = { preset?: string; fontSize?: number; textColor?: string; accentColor?: string; position?: number; uppercase?: boolean; fontFamily?: string };
 export type RenderPayload = { duration?: number; fps?: number; format?: string; quality?: 'standard' | 'high' | 'maximum'; projectName?: string; tracks?: TrackInput[]; assets?: AssetInput[]; captions?: CaptionInput[]; captionStyle?: CaptionStyleInput };
 
 const number = (value: unknown, fallback: number, min = -Infinity, max = Infinity) => {
@@ -62,6 +63,7 @@ function makeAss(captions: CaptionInput[], style: CaptionStyleInput, duration: n
   const accent = assColor(style.accentColor);
   const borderStyle = style.preset === 'box' ? 3 : 1;
   const outline = style.preset === 'minimal' ? 1 : 3;
+  const fontName = getCaptionFont(style.fontFamily).family.replace(/,/g, '');
   const body = captions
     .filter((caption) => caption.end > 0 && caption.start < duration)
     .map((caption) => {
@@ -74,7 +76,7 @@ function makeAss(captions: CaptionInput[], style: CaptionStyleInput, duration: n
       const text = style.preset === 'impact' ? `{\\c${primary}\\bord${outline}}${karaoke}` : karaoke;
       return `Dialogue: 0,${assTime(caption.start)},${assTime(Math.min(duration, caption.end))},Darja,,0,0,0,,${text}`;
     }).join('\n');
-  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Darja,DejaVu Sans,${fontSize},${primary},${accent},&H00101012,&H90000000,-1,0,0,0,100,100,0,0,${borderStyle},${outline},2,2,28,28,${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${body}\n`;
+  return `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Darja,${fontName},${fontSize},${primary},${accent},&H00101012,&H90000000,-1,0,0,0,100,100,0,0,${borderStyle},${outline},2,2,28,28,${marginV},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n${body}\n`;
 }
 
 async function existingAssetPath(asset?: AssetInput) {
@@ -175,7 +177,10 @@ export async function renderVideo(payload: RenderPayload) {
   });
 
   const escapedAssPath = assPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
-  filters.push(`[${baseLabel}]subtitles=filename='${escapedAssPath}'[vout]`);
+  const selectedFont = getCaptionFont(payload.captionStyle?.fontFamily);
+  const fontDirectory = path.join(process.cwd(), 'node_modules', '@fontsource', selectedFont.packageName, 'files');
+  const escapedFontDirectory = fontDirectory.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+  filters.push(`[${baseLabel}]subtitles=filename='${escapedAssPath}':fontsdir='${escapedFontDirectory}'[vout]`);
 
   const audioLabels: string[] = [];
   audioClips.forEach((clip, index) => {
