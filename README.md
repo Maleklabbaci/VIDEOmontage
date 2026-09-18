@@ -11,7 +11,8 @@ npm run dev
 
 ## Fonctionnalités actives
 
-- workflow voice-first : upload voix off → transcription automatique → script/captions mot par mot → vidéos → styles → montage ;
+- workflow voice-first : upload voix off (ou génération de la voix off par IA depuis un script) → transcription automatique → script/captions mot par mot → vidéos → styles → montage ;
+- génération de voix off par IA (TTS) directement depuis un script écrit ou généré, sans micro ni enregistrement ;
 - transcription locale de la voix en Darija/arabe/français avec Whisper ONNX open source ;
 - import optionnel des scripts/timestamps exacts `{ word, start, end }` fournis par la plateforme voix ;
 - correction manuelle du texte transcrit et réalignement disponible ;
@@ -55,6 +56,22 @@ npm run dev
 - export MP4 réel en H.264 1080×1920, audio AAC et captions intégrées ;
 - moteur FFmpeg isolé et entièrement self-hosted.
 
+## Quick Studio (flow simplifié)
+
+Accessible sur `/quick`. Pensé comme une appli haut niveau (pas un éditeur type DaVinci Resolve) en 4 étapes :
+
+1. **Voix off + script** : soit importée depuis Sawtify (lien audio direct + script déjà généré, sans rappeler d'API TTS), soit un fichier audio uploadé manuellement avec son script exact collé à côté.
+2. **Vidéos** : upload multiple/drag-and-drop des rushs, avec une courte description par clip pour aider le montage automatique.
+3. **Captions** : choix de la langue d'affichage (langue d'origine, arabe, français, anglais ou darija) — traduites à la volée par Gemini si besoin.
+4. **Résultat** : montage généré automatiquement, calé exactement sur la durée de la voix off, avec captions karaoke intégrées, prêt à télécharger.
+
+Le montage réutilise le planificateur sémantique (`/api/plan`) pour associer chaque segment du script aux clips les plus pertinents et découper leur durée proportionnellement à la durée réelle de la voix off, puis le même moteur de rendu FFmpeg que l'éditeur avancé (`/api/render`).
+
+### API additionnelles
+
+- `POST /api/sawtify/import` : récupère la voix off + le script déjà générés par Sawtify (par lien `audioUrl` en JSON, ou par fichier direct en `multipart/form-data`), sans appeler de moteur TTS.
+- `POST /api/captions/translate` : traduit/adapte les captions vers l'arabe, le français, l'anglais ou la darija via l'API Gemini. Nécessite une clé `GEMINI_API_KEY` côté serveur (variable optionnelle `GEMINI_MODEL`, par défaut `gemini-2.5-flash`). Sans clé, la route répond une erreur claire et l'interface reste utilisable en gardant la langue d'origine des captions.
+
 ## API
 
 - `POST /api/assets` : stockage d’un média ;
@@ -63,7 +80,14 @@ npm run dev
 - `POST /api/script` : génération locale du script darija ;
 - `POST /api/align` : alignement mot par mot exact ou estimé ;
 - `POST /api/transcribe` : génération locale du script, des captions et timestamps depuis la voix ;
-- `POST /api/plan` : sélection sémantique des plans pour chaque scène.
+- `POST /api/plan` : sélection sémantique des plans pour chaque scène ;
+- `POST /api/voiceover` : génération d'une voix off par IA (TTS) à partir d'un script `{ script, language: "ar" | "fr" }`.
+
+### Voix off par IA (TTS)
+
+- Français : généré localement, gratuit, sans clé (moteur ONNX self-hosted `kokoro-js`, modèle `onnx-community/Kokoro-82M-v1.0-ONNX`, voix `ff_siwis`) ;
+- Darija/arabe : nécessite une clé `ELEVENLABS_API_KEY` (meilleure qualité multilingue) côté serveur. Voix personnalisables via `DARJA_TTS_VOICE_AR` / `DARJA_TTS_VOICE_FR` (IDs de voix ElevenLabs). Sans clé, l'étape 1 affiche une erreur claire et invite à importer une voix off enregistrée en attendant ;
+- la voix générée est ensuite retranscrite automatiquement par Whisper (comme un fichier importé) pour produire les captions mot par mot synchronisées.
 
 Le modèle par défaut est `onnx-community/whisper-tiny_timestamped`. Pour une qualité Darija supérieure sur un serveur plus puissant :
 

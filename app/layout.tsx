@@ -32,6 +32,7 @@ import './voice-workflow.css';
 import './transcription-workflow.css';
 import './font-library.css';
 import './caption-customizer.css';
+import './quick-studio.css';
 
 export const metadata: Metadata = {
   title: 'Darja Studio — Éditeur vidéo',

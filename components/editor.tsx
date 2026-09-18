@@ -1074,6 +1074,11 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
   const [apiWordTimings, setApiWordTimings] = useState<WordTiming[]>([]);
   const [visualAssets, setVisualAssets] = useState<MediaAsset[]>([]);
   const [voiceAsset, setVoiceAsset] = useState<MediaAsset | null>(null);
+  const [voiceTab, setVoiceTab] = useState<'import' | 'ai'>('import');
+  const [ttsLanguage, setTtsLanguage] = useState<'ar' | 'fr'>('ar');
+  const [ttsScript, setTtsScript] = useState('');
+  const [ttsScriptLoading, setTtsScriptLoading] = useState(false);
+  const [ttsGenerating, setTtsGenerating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [dropActive, setDropActive] = useState(false);
   const [template, setTemplate] = useState('dz-impact');
@@ -1138,6 +1143,45 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
     await transcribeVoice(uploaded);
   };
 
+  const generateTtsScript = async () => {
+    if (topic.trim().length < 3) return;
+    setTtsScriptLoading(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic, tone, duration }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Génération du texte impossible');
+      setTtsScript(ttsLanguage === 'ar' ? data.scriptAr : data.script);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Génération du texte impossible');
+    } finally {
+      setTtsScriptLoading(false);
+    }
+  };
+
+  const generateVoiceover = async () => {
+    if (ttsScript.trim().length < 2) { setMessage('Écris ou génère un texte avant de créer la voix.'); return; }
+    setTtsGenerating(true);
+    setMessage('Génération de la voix off par IA…');
+    try {
+      const response = await fetch('/api/voiceover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script: ttsScript.trim(), language: ttsLanguage }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Génération de la voix off impossible');
+      const asset: MediaAsset = { id: `tts-${Date.now()}`, name: data.name, kind: 'audio', url: data.url, storageId: data.storageId, duration: data.duration, color: PALETTE[5 % PALETTE.length] };
+      setVoiceAsset(asset);
+      setScript(null);
+      setManualScript('');
+      setAlignmentMode(null);
+      if (asset.duration) setDuration(Number(Math.min(600, asset.duration).toFixed(2)));
+      setMessage('Voix off générée. Génération automatique du script…');
+      await transcribeVoice(asset, ttsLanguage);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Génération de la voix off impossible');
+    } finally {
+      setTtsGenerating(false);
+    }
+  };
+
   const loadWordTimestamps = async (file?: File) => {
     if (!file) return;
     try {
@@ -1152,13 +1196,13 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
     }
   };
 
-  const transcribeVoice = async (asset: MediaAsset | null = voiceAsset) => {
+  const transcribeVoice = async (asset: MediaAsset | null = voiceAsset, languageOverride?: 'auto' | 'ar' | 'fr') => {
     if (!asset?.storageId) { setMessage('La voix doit finir son upload serveur avant la transcription.'); return; }
     setTranscribing(true);
     setScriptSource('voice');
     setMessage('Whisper écoute la voix et génère les captions mot par mot… Le premier lancement peut télécharger le modèle local.');
     try {
-      const response = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storageId: asset.storageId, duration: asset.duration ?? duration, language: transcriptionLanguage }) });
+      const response = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storageId: asset.storageId, duration: asset.duration ?? duration, language: languageOverride ?? transcriptionLanguage }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Transcription impossible');
       setScript({ script: data.script, scriptAr: data.scriptAr ?? data.script, captions: data.captions, engine: data.engine });
@@ -1326,7 +1370,10 @@ function AutoStudio({ onOpenAdvanced }: { onOpenAdvanced: () => void }) {
           <div className="auto-panel">
             {step === 1 && <div className="auto-step-content voice-first-step">
               <div className="auto-section-title"><span>01</span><div><h2>Importe la voix, le script se génère</h2><p>Whisper écoute l’audio et crée automatiquement le texte, les captions et les timestamps mot par mot.</p></div></div>
-              {!voiceAsset ? <button className="auto-upload-zone voice-zone" onClick={() => voiceInputRef.current?.click()}><i><Mic2 size={25}/></i><strong>Importer la voix off</strong><span>MP3, WAV, M4A ou AAC</span></button> : <div className="voice-ready"><i><Volume2 size={22}/></i><div><strong>{voiceAsset.name}</strong><span>{voiceAsset.duration ? `${voiceAsset.duration.toFixed(2)} secondes détectées` : 'Audio prêt'}</span></div><audio controls src={voiceAsset.url}/><button onClick={() => { setVoiceAsset(null); setScript(null); setAlignmentMode(null); }}><Trash2 size={15}/></button></div>}
+              {!voiceAsset && <div className="script-source-switch three"><button className={voiceTab === 'import' ? 'active' : ''} onClick={() => setVoiceTab('import')}><UploadCloud size={14}/> Importer un fichier</button><button className={voiceTab === 'ai' ? 'active' : ''} onClick={() => setVoiceTab('ai')}><Sparkles size={14}/> Générer par IA</button></div>}
+              {!voiceAsset && voiceTab === 'import' && <button className="auto-upload-zone voice-zone" onClick={() => voiceInputRef.current?.click()}><i><Mic2 size={25}/></i><strong>Importer la voix off</strong><span>MP3, WAV, M4A ou AAC</span></button>}
+              {!voiceAsset && voiceTab === 'ai' && <div className="voice-transcription-card"><div><i><Sparkles size={18}/></i><span><strong>Voix off générée par IA</strong><small>Écris ou génère un texte, puis crée la voix.</small></span></div><div className="auto-options sync-options"><label>Sujet<input value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Ex : présenter mon produit…" maxLength={120}/></label><label>Ton<select value={tone} onChange={(event) => setTone(event.target.value as typeof tone)}><option value="energetic">Énergique</option><option value="educational">Éducatif</option><option value="sales">Commercial</option><option value="story">Storytelling</option></select></label><label>Langue voix<select value={ttsLanguage} onChange={(event) => setTtsLanguage(event.target.value as typeof ttsLanguage)}><option value="ar">Darija / Arabe</option><option value="fr">Français</option></select></label></div><button disabled={ttsScriptLoading || topic.trim().length < 3} onClick={() => void generateTtsScript()}>{ttsScriptLoading ? 'Génération du texte…' : 'Générer le texte (IA)'}</button><label className="auto-topic script-paste"><textarea value={ttsScript} onChange={(event) => setTtsScript(event.target.value)} placeholder="…ou colle/écris ici le texte à transformer en voix" maxLength={4000}/><small>{ttsScript.trim().split(/\s+/).filter(Boolean).length} mots</small></label><button disabled={ttsGenerating || ttsScript.trim().length < 2} onClick={() => void generateVoiceover()}>{ttsGenerating ? 'Génération de la voix…' : 'Générer la voix off (IA)'}</button></div>}
+              {voiceAsset && <div className="voice-ready"><i><Volume2 size={22}/></i><div><strong>{voiceAsset.name}</strong><span>{voiceAsset.duration ? `${voiceAsset.duration.toFixed(2)} secondes détectées` : 'Audio prêt'}</span></div><audio controls src={voiceAsset.url}/><button onClick={() => { setVoiceAsset(null); setScript(null); setAlignmentMode(null); setTtsScript(''); }}><Trash2 size={15}/></button></div>}
               <input ref={voiceInputRef} type="file" hidden accept="audio/*" onChange={(event) => { void addVoiceFile(event.target.files?.[0]); event.target.value = ''; }}/>
               {voiceAsset && <div className={`voice-transcription-card ${script ? 'ready' : ''}`}><div><i>{transcribing ? <RotateCcw className="spin" size={18}/> : script ? <CheckCircle2 size={18}/> : <Sparkles size={18}/>}</i><span><strong>{transcribing ? 'Génération du script en cours…' : script ? 'Script et captions générés' : 'Générer depuis cette voix'}</strong><small>{transcribing ? 'Analyse locale Whisper · attends la fin du traitement' : script ? `${script.captions.reduce((sum, caption) => sum + (caption.words?.length ?? 0), 0)} mots · ${script.captions.length} captions synchronisées` : 'Transcription Darija, arabe ou français'}</small></span></div><label>Langue<select value={transcriptionLanguage} disabled={transcribing} onChange={(event) => setTranscriptionLanguage(event.target.value as typeof transcriptionLanguage)}><option value="auto">Détection automatique</option><option value="ar">Darija / Arabe</option><option value="fr">Français</option></select></label><button disabled={transcribing || uploading} onClick={() => void transcribeVoice()}>{transcribing ? 'Transcription…' : script ? 'Retranscrire' : 'Transcrire la voix'}</button></div>}
               {voiceAsset && <details className="timestamps-optional"><summary>Option avancée : importer le script/timestamps de ta plateforme</summary><div className="timestamps-card"><div><i><Sparkles size={17}/></i><span><strong>Timestamps API disponibles ?</strong><small>Ils restent prioritaires pour une synchronisation authoritative.</small></span></div><button onClick={() => timestampsInputRef.current?.click()}>{apiWordTimings.length ? <><Check size={14}/> {apiWordTimings.length} mots chargés</> : <><UploadCloud size={14}/> Importer JSON</>}</button><input ref={timestampsInputRef} type="file" hidden accept=".json,application/json" onChange={(event) => { void loadWordTimestamps(event.target.files?.[0]); event.target.value = ''; }}/></div></details>}
