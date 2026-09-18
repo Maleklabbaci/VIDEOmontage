@@ -1,12 +1,15 @@
 .quick-studio { min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--text); }
 
-.quick-top { height: 64px; padding: 0 22px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: #14151a; flex: 0 0 auto; }
+.quick-top { height: 64px; padding: 0 22px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); background: #14151a; flex: 0 0 auto; }
 .quick-brand { display: flex; align-items: center; gap: 10px; }
 .quick-brand-mark { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; color: white; background: linear-gradient(145deg, var(--purple), #4b3fd6); font-weight: 900; font-size: 15px; }
 .quick-brand strong { font-size: 14px; letter-spacing: 0.02em; }
 .quick-brand span { display: block; color: var(--muted); font-size: 11px; }
 .quick-back { height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; display: flex; align-items: center; gap: 6px; color: var(--muted); background: transparent; font-size: 12px; cursor: pointer; text-decoration: none; }
 .quick-back:hover { color: white; border-color: #3a3d46; }
+.quick-points { margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid rgba(117,103,255,.35); border-radius: 999px; color: #d8d4ff; background: rgba(117,103,255,.12); font-size: 12px; }
+.quick-points svg { color: #b5aaff; }
+.quick-points span { color: var(--muted); font-size: 11px; }
 
 .quick-steps { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 18px 22px; }
 .quick-step-pill { display: flex; align-items: center; gap: 8px; padding: 7px 13px; border-radius: 20px; background: var(--panel); color: var(--muted-2); font-size: 12px; font-weight: 650; border: 1px solid transparent; }
@@ -28,6 +31,7 @@
 .quick-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 10px; background: #14151a; margin-bottom: 16px; }
 .quick-switch button { height: 38px; border: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--muted-2); background: transparent; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .quick-switch button.active { color: #ded9ff; background: #262538; }
+.quick-switch-three { grid-template-columns: repeat(3, 1fr); }
 
 .quick-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .quick-field label { font-size: 11.5px; color: var(--muted); font-weight: 650; }
@@ -60,6 +64,8 @@
 .quick-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; }
 .quick-primary { height: 44px; padding: 0 20px; border: 0; border-radius: 10px; display: flex; align-items: center; gap: 8px; color: white; background: linear-gradient(145deg, var(--purple), #5a4de0); font-size: 13.5px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 20px rgba(117, 103, 255, 0.25); }
 .quick-primary:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+.quick-one-click { width: 100%; justify-content: center; background: linear-gradient(135deg, #8b2cff, #6218d7); box-shadow: 0 12px 28px rgba(116, 48, 229, .32); }
+.quick-one-click:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.08); }
 .quick-secondary { height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 10px; display: flex; align-items: center; gap: 8px; color: var(--muted); background: transparent; font-size: 13px; cursor: pointer; }
 .quick-secondary:hover { color: white; border-color: #3a3d46; }
 .quick-secondary:disabled { opacity: 0.35; cursor: not-allowed; }

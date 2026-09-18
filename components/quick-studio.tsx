@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Coins,
   Download,
   Film,
   Link2,
@@ -18,10 +19,10 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import { ChangeEvent, DragEvent, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type Step = 'voice' | 'videos' | 'style' | 'result';
-type VoiceMode = 'sawtify' | 'manual';
+type VoiceMode = 'sawtify' | 'sawtify-file' | 'manual';
 type CaptionLanguage = 'source' | 'ar' | 'fr' | 'en' | 'darija';
 
 type VoiceAsset = { storageId: string; url: string; name: string; duration?: number };
@@ -92,6 +93,9 @@ export function QuickStudio() {
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const voiceInputRef = useRef<HTMLInputElement>(null);
+  const sawtifyFileInputRef = useRef<HTMLInputElement>(null);
+  const [points, setPoints] = useState<number | null>(null);
+  const [pointsLoading, setPointsLoading] = useState(true);
 
   // Étape 2 — vidéos
   const [videos, setVideos] = useState<VideoAsset[]>([]);
@@ -113,6 +117,13 @@ export function QuickStudio() {
   const targetDuration = voice?.duration;
 
   const stepIndex = useMemo(() => STEPS.findIndex((item) => item.id === step), [step]);
+
+  useEffect(() => {
+    void fetch('/api/credits').then(async (response) => {
+      const data = await response.json();
+      setPoints(Number(data.points ?? 0));
+    }).catch(() => setPoints(null)).finally(() => setPointsLoading(false));
+  }, []);
 
   const importFromSawtify = async () => {
     setVoiceError(null);
@@ -174,6 +185,35 @@ export function QuickStudio() {
     setVoiceError(null);
   };
 
+  const importSawtifyFile = async (file?: File) => {
+    setVoiceError(null);
+    if (!file || !file.type.startsWith('audio')) {
+      setVoiceError('Choisis un fichier audio Sawtify (MP3, WAV, M4A…).');
+      return;
+    }
+    if (sawtifyScript.trim().length < 2) {
+      setVoiceError('Colle le script Sawtify avant d’importer la voix.');
+      return;
+    }
+    setVoiceLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('script', sawtifyScript.trim());
+      const response = await fetch('/api/sawtify/import', { method: 'POST', body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Import Sawtify impossible.');
+      const duration = await probeDuration(data.url, true);
+      setVoice({ storageId: data.storageId, url: data.url, name: data.name, duration });
+      setScript(data.script);
+      setWordTimestamps(Array.isArray(data.wordTimestamps) ? data.wordTimestamps : []);
+    } catch (error) {
+      setVoiceError(error instanceof Error ? error.message : 'Import Sawtify impossible.');
+    } finally {
+      setVoiceLoading(false);
+    }
+  };
+
   const addVideoFiles = async (files: File[]) => {
     const compatible = files.filter((file) => file.type.startsWith('video') || file.type.startsWith('image'));
     if (!compatible.length) {
@@ -215,7 +255,13 @@ export function QuickStudio() {
     if (!voice || !script.trim() || !videos.length) return;
     setGenerating(true);
     setGenerateError(null);
+    let charged = false;
     try {
+      const creditResponse = await fetch('/api/credits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'debit' }) });
+      const creditData = await creditResponse.json();
+      if (!creditResponse.ok) throw new Error(creditData.error || 'Points insuffisants.');
+      setPoints(Number(creditData.points));
+      charged = true;
       setProgressLabel('Synchronisation du script sur la voix off…');
       const alignResponse = await fetch('/api/align', {
         method: 'POST',
@@ -314,6 +360,10 @@ export function QuickStudio() {
       setResultName('video-finale.mp4');
       setStep('result');
     } catch (error) {
+      if (charged) {
+        await fetch('/api/credits', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'refund' }) }).catch(() => undefined);
+        setPoints((current) => current === null ? current : current + 250);
+      }
       setGenerateError(error instanceof Error ? error.message : 'Génération impossible.');
     } finally {
       setGenerating(false);
@@ -346,6 +396,7 @@ export function QuickStudio() {
         <a className="quick-back" href="/">
           <ArrowLeft size={15} /> Éditeur complet
         </a>
+        <div className="quick-points"><Coins size={14} /><strong>{pointsLoading ? '…' : points ?? 0}</strong><span>points</span></div>
       </div>
 
       <div className="quick-steps">
@@ -369,9 +420,12 @@ export function QuickStudio() {
 
               {!voice ? (
                 <div className="quick-card">
-                  <div className="quick-switch">
+                  <div className="quick-switch quick-switch-three">
                     <button className={voiceMode === 'sawtify' ? 'active' : ''} onClick={() => setVoiceMode('sawtify')}>
                       <Link2 size={14} /> Depuis Sawtify
+                    </button>
+                    <button className={voiceMode === 'sawtify-file' ? 'active' : ''} onClick={() => setVoiceMode('sawtify-file')}>
+                      <Mic2 size={14} /> Audio + script
                     </button>
                     <button className={voiceMode === 'manual' ? 'active' : ''} onClick={() => setVoiceMode('manual')}>
                       <UploadCloud size={14} /> Import manuel
@@ -393,6 +447,19 @@ export function QuickStudio() {
                       <button className="quick-primary" disabled={voiceLoading} onClick={() => void importFromSawtify()}>
                         {voiceLoading ? <Loader2 className="quick-spin" size={16} /> : <Link2 size={16} />}
                         {voiceLoading ? 'Import…' : 'Importer depuis Sawtify'}
+                      </button>
+                    </>
+                  ) : voiceMode === 'sawtify-file' ? (
+                    <>
+                      <div className="quick-field">
+                        <label>Script exporté depuis Sawtify</label>
+                        <textarea value={sawtifyScript} onChange={(event) => setSawtifyScript(event.target.value)} placeholder="Colle le script généré dans Sawtify…" maxLength={12000} />
+                      </div>
+                      <input ref={sawtifyFileInputRef} type="file" accept="audio/*" hidden onChange={(event: ChangeEvent<HTMLInputElement>) => void importSawtifyFile(event.target.files?.[0])} />
+                      <button className="quick-dropzone" onClick={() => sawtifyFileInputRef.current?.click()} type="button">
+                        <Mic2 size={22} />
+                        <strong>{voiceLoading ? 'Import…' : 'Importer l’audio Sawtify'}</strong>
+                        <span>Le son et le script sont envoyés ensemble</span>
                       </button>
                     </>
                   ) : (
@@ -545,9 +612,9 @@ export function QuickStudio() {
                 <button className="quick-secondary" disabled={generating} onClick={() => setStep('videos')}>
                   <ArrowLeft size={16} /> Retour
                 </button>
-                <button className="quick-primary" disabled={generating} onClick={() => void generateFinalVideo()}>
+                <button className="quick-primary quick-one-click" disabled={generating || points === null || points <= 1000} onClick={() => void generateFinalVideo()}>
                   {generating ? <Loader2 className="quick-spin" size={16} /> : <Wand2 size={16} />}
-                  {generating ? 'Génération…' : 'Générer la vidéo'}
+                  {generating ? 'Génération…' : 'Faire le montage en 1 clic · 250 pts'}
                 </button>
               </div>
             </>
