@@ -151,6 +151,33 @@ export function QuickStudio() {
     }
   };
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const audioUrl = params.get('audioUrl');
+    const importedScript = params.get('script');
+    if (!audioUrl || !importedScript) return;
+    setSawtifyUrl(audioUrl);
+    setSawtifyScript(importedScript);
+    void (async () => {
+      setVoiceMode('sawtify');
+      setVoiceLoading(true);
+      setVoiceError(null);
+      try {
+        const response = await fetch('/api/sawtify/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audioUrl, script: importedScript }) });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Import Sawtify impossible.');
+        const duration = await probeDuration(data.url, true);
+        setVoice({ storageId: data.storageId, url: data.url, name: data.name, duration });
+        setScript(data.script);
+        setWordTimestamps(Array.isArray(data.wordTimestamps) ? data.wordTimestamps : []);
+      } catch (error) {
+        setVoiceError(error instanceof Error ? error.message : 'Import Sawtify impossible.');
+      } finally {
+        setVoiceLoading(false);
+      }
+    })();
+  }, []);
+
   const importManualVoice = async (file?: File) => {
     setVoiceError(null);
     if (!file || !file.type.startsWith('audio')) {
