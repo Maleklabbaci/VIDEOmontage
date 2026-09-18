@@ -414,12 +414,13 @@ export function QuickStudio() {
     <div className="quick-studio">
       <div className="quick-top">
         <div className="quick-brand">
-          <div className="quick-brand-mark">Q</div>
+          <div className="quick-brand-mark">◐</div>
           <div>
-            <strong>Quick Studio</strong>
-            <span>Voix off → vidéos → montage → résultat</span>
+            <strong>Sawtify</strong>
+            <span>Montage vidéo</span>
           </div>
         </div>
+        <nav className="quick-nav" aria-label="Navigation Sawtify"><a href="/">Studio Vocal</a><a href="/quick" className="active">Montage vidéo</a><span>Historique</span><span>Points &amp; Tarifs</span></nav>
         <a className="quick-back" href="/">
           <ArrowLeft size={15} /> Éditeur complet
         </a>
